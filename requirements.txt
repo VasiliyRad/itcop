@@ -1,4 +1,4 @@
-langchain
-openai
-streamlit
-
+python-dotenv>=1.0.0
+requests>=2.31.0
+mcp>=1.0.0
+streamlit>=1.24.0
