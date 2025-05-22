@@ -10,6 +10,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from configuration import Configuration
 
+import nest_asyncio
+nest_asyncio.apply()  # allows nested event loops
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -376,13 +379,6 @@ class ChatSession:
                 self.conversation.append({"role": "assistant", "content": final_response})
             return self.conversation
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No event loop running
-            return asyncio.run(_process())
-        else:
-            # Reuse existing loop (Streamlit case)
-            return loop.run_until_complete(_process())
+        return asyncio.run(_process())
 
 
