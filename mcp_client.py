@@ -28,6 +28,7 @@ class Server:
         self.session: ClientSession | None = None
         self._cleanup_lock: asyncio.Lock = asyncio.Lock()
         self.exit_stack: AsyncExitStack = AsyncExitStack()
+        self._cached_tools: list[Any] = []
 
     async def initialize(self) -> None:
         """Initialize the server connection."""
@@ -37,6 +38,7 @@ class Server:
             else self.config["command"]
         )
         if command is None:
+            logging.exception("Invalid command")
             raise ValueError("The command must be a valid string and cannot be None.")
 
         server_params = StdioServerParameters(
@@ -47,15 +49,18 @@ class Server:
             else None,
         )
         try:
+            logging.info("Starting server connection")
             stdio_transport = await self.exit_stack.enter_async_context(
                 stdio_client(server_params)
             )
             read, write = stdio_transport
+            logging.info("Creating client session")
             session = await self.exit_stack.enter_async_context(
                 ClientSession(read, write)
             )
             await session.initialize()
             self.session = session
+            logging.info("Session is initialized")
         except Exception as e:
             logging.error(f"Error initializing server {self.name}: {e}")
             await self.cleanup()
@@ -71,19 +76,24 @@ class Server:
             RuntimeError: If the server is not initialized.
         """
         if not self.session:
-            raise RuntimeError(f"Server {self.name} not initialized")
+            logging.exception("Exception: server is not initialized")
+            raise RuntimeError(f"Server {self.name} is not initialized")
 
-        tools_response = await self.session.list_tools()
-        tools = []
+        logging.info("Getting list of tools")
+        if self._cached_tools == []:
+            tools_response = await self.session.list_tools()
+            self._cached_tools = []
 
-        for item in tools_response:
-            if isinstance(item, tuple) and item[0] == "tools":
-                tools.extend(
-                    Tool(tool.name, tool.description, tool.inputSchema)
-                    for tool in item[1]
-                )
+            for item in tools_response:
+                if isinstance(item, tuple) and item[0] == "tools":
+                    self._cached_tools.extend(
+                        Tool(tool.name, tool.description, tool.inputSchema)
+                        for tool in item[1]
+                    )
 
-        return tools
+        logging.info("Listed tools")
+
+        return self._cached_tools
 
     async def execute_tool(
         self,
@@ -91,14 +101,16 @@ class Server:
         arguments: dict[str, Any],
         retries: int = 2,
         delay: float = 1.0,
+        timeout: float = 60.0,
     ) -> Any:
-        """Execute a tool with retry mechanism.
+        """Execute a tool with retry mechanism and session recovery.
 
         Args:
             tool_name: Name of the tool to execute.
             arguments: Tool arguments.
             retries: Number of retry attempts.
             delay: Delay between retries in seconds.
+            timeout: Timeout for tool execution in seconds.
 
         Returns:
             Tool execution result.
@@ -108,21 +120,34 @@ class Server:
             Exception: If tool execution fails after all retries.
         """
         if not self.session:
-            raise RuntimeError(f"Server {self.name} not initialized")
+            print("Exception: server is not initialized")
+            raise RuntimeError(f"Server {self.name} is not initialized")
 
         attempt = 0
         while attempt < retries:
             try:
                 logging.info(f"Executing {tool_name}...")
-                result = await self.session.call_tool(tool_name, arguments)
+                result = await asyncio.wait_for(
+                    self.session.call_tool(tool_name, arguments),
+                    timeout=timeout
+                )
+                logging.info("Tool execution is done")
 
                 return result
 
             except Exception as e:
                 attempt += 1
                 logging.warning(
-                    f"Error executing tool: {e}. Attempt {attempt} of {retries}."
+                    f"Error executing tool: {type(e).__name__}: {str(e)}. Attempt {attempt} of {retries}."
                 )
+                # Attempt to recover session on error or timeout
+                try:
+                    logging.info("Attempting to recover session...")
+                    await self.cleanup()
+                    await self.initialize()
+                    logging.info("Session recovered successfully.")
+                except Exception as init_e:
+                    logging.error(f"Error during session recovery: {init_e}")
                 if attempt < retries:
                     logging.info(f"Retrying in {delay} seconds...")
                     await asyncio.sleep(delay)
@@ -137,6 +162,7 @@ class Server:
                 await self.exit_stack.aclose()
                 self.session = None
                 self.stdio_context = None
+                logging.info(f"Server {self.name} cleaned up successfully.")
             except Exception as e:
                 logging.error(f"Error during cleanup of server {self.name}: {e}")
 
@@ -233,6 +259,7 @@ class LLMClient:
                 f"I encountered an error: {error_message}. "
                 "Please try again or rephrase your request."
             )
+        
     def get_response(self, messages: list[dict[str, str]]) -> str:
         url = "https://api.openai.com/v1/chat/completions"
 
@@ -326,6 +353,7 @@ class ChatSession:
             try:
                 await server.initialize()
             except Exception as e:
+                logging.exception("Failed to initialize server")
                 raise RuntimeError(f"Failed to initialize server: {e}")
         all_tools = []
         for server in self.servers:
@@ -340,14 +368,19 @@ class ChatSession:
             tool_call = json.loads(llm_response)
             if "tool" in tool_call and "arguments" in tool_call:
                 for server in self.servers:
+                    logging.info(f"Checking tools on server: {server.name}")
                     tools = await server.list_tools()
                     if any(tool.name == tool_call["tool"] for tool in tools):
                         try:
+                            logging.info("Executing tool")
                             result = await server.execute_tool(
                                 tool_call["tool"], tool_call["arguments"]
                             )
+                            logging.info("Tool was executed successfully")
+
                             return f"Tool execution result: {result}"
                         except Exception as e:
+                            logging.exception(f"Error executing tool: {e}")
                             return f"Error executing tool: {str(e)}"
                 return f"No server found with tool: {tool_call['tool']}"
             return llm_response
@@ -369,6 +402,7 @@ class ChatSession:
             self.conversation.append({"role": "user", "content": user_input})
             llm_response = self.llm_client.get_response(self.conversation + [self.get_system_message()])
             self.conversation.append({"role": "assistant", "content": llm_response})
+            print("Got LLM response:", llm_response)
 
             result = await self.process_llm_response(llm_response)
 
@@ -377,6 +411,8 @@ class ChatSession:
                 self.conversation.append({"role": "system", "content": result})
                 final_response = self.llm_client.get_response(self.conversation + [self.get_system_message()])
                 self.conversation.append({"role": "assistant", "content": final_response})
+            
+            logging.info("Responded to user")
             return self.conversation
 
         return asyncio.run(_process())

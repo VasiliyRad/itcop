@@ -66,11 +66,11 @@ elif selected_tab == "Test MCP":
         elif msg["role"] == "system":
             st.info(msg["content"])
 
-    # User input
-    with st.form(key="mcp_form", clear_on_submit=True):
-        user_input = st.text_input("Type your message:", key="user_input")
-        submitted = st.form_submit_button("Send")
-        if submitted and user_input.strip():
+    def handle_submit():
+        user_input = st.session_state.user_input.strip()
+        if user_input:
             updated_convo = chat_session.process_message_sync(user_input)
             st.session_state.conversation = updated_convo
-            st.rerun()
+            st.session_state.user_input = ""  # Clear input box
+
+    st.text_input("Type your message:", key="user_input", on_change=handle_submit)
