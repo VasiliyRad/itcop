@@ -1,9 +1,10 @@
 {
   "mcpServers": {
-    "browsermcp": {
+    "playwright": {
       "command": "npx",
-      "args": ["@browsermcp/mcp@latest"]
+      "args": [
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }
-

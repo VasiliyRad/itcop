@@ -1,76 +1,231 @@
-import streamlit as st
+from contextlib import AsyncExitStack
+import gradio as gr
+import asyncio
+import logging
+import threading
 from configuration import Configuration
-from mcp_client import Server, LLMClient, ChatSession
+from mcp_manager import MCPManager
+from chat_manager import ChatManager
+from llm_client import LLMClient
 
-# Tab titles
-tabs = ["Configure credentials", "Setup channels", "Setup tasks", "Monitor tasks", "Test MCP"]
+chatmanager = None 
+exit_stack = None
 
-# Handle query params to default to "Monitor tasks"
-params = st.query_params
-default_tab = params.get("tab", ["Monitor tasks"])[0]
-default_index = tabs.index(default_tab) if default_tab in tabs else 3
+# Handlers
+def configure_credentials(action):
+    return f"{action} setup done ✅"
 
-# Tab selection
-selected_tab = st.selectbox("Navigation", tabs, index=default_index)
-params.tab=selected_tab
+def setup_channels():
+    return "Started listening to Gmail ✅"
 
-# Tab content logic
-if selected_tab == "Configure credentials":
-    st.header("Configure credentials")
-    if st.button("Setup Gmail"):
-        st.success("Done")
-    if st.button("Setup GitHub"):
-        st.success("Done")
+def setup_tasks():
+    return "GitHub task setup complete ✅"
 
-elif selected_tab == "Setup channels":
-    st.header("Setup channels")
-    if st.button("Listen to Gmail"):
-        st.success("Done")
+def monitor_tasks():
+    return "No tasks are setup."
 
-elif selected_tab == "Setup tasks":
-    st.header("Setup tasks")
-    if st.button("Setup GitHub task"):
-        st.success("Done")
+def process_message(command):
+    global loop, chatmanager
+    
+    if not loop or not chatmanager:
+        return "Error: System not initialized"
+    
+    if not command.strip():
+        return "Please enter a command"
+    
+    try:
+        # Schedule the coroutine on the event loop and wait for result
+        future = asyncio.run_coroutine_threadsafe(
+            chatmanager.process_message(command), loop
+        )
+        # Wait for result with timeout
+        result = future.result(timeout=30)
+        return result
+    except asyncio.TimeoutError:
+        return "Error: Command timed out"
+    except Exception as e:
+        logging.error(f"Error in process_message: {e}")
+        return f"Error: {str(e)}"
 
-elif selected_tab == "Monitor tasks":
-    st.header("Monitor tasks")
-    st.info("No tasks are setup")
+def process_message_and_clear(command):
+    """Process message and return both result and empty string to clear input"""
+    result = process_message(command)
+    return result, ""
 
-elif selected_tab == "Test MCP":
-    st.header("Test MCP")
+# Tab content functions
+def render_tab(tab, command_input=""):
+    if tab == "Configure credentials":
+        return (
+            "Configure credentials",
+            gr.update(visible=True), gr.update(visible=True),
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False), gr.update(visible=False),
+            ""
+        )
+    elif tab == "Setup channels":
+        return (
+            "Setup channels",
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=True), gr.update(visible=False),
+            gr.update(visible=False), gr.update(visible=False),
+            ""
+        )
+    elif tab == "Setup tasks":
+        return (
+            "Setup tasks",
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False), gr.update(visible=True),
+            gr.update(visible=False), gr.update(visible=False),
+            ""
+        )
+    elif tab == "Monitor tasks":
+        return (
+            "Monitor tasks",
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False), gr.update(visible=False),
+            monitor_tasks()
+        )
+    elif tab == "Test MCP":
+        return (
+            "Test MCP",
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=True), gr.update(visible=True),
+            ""
+        )
 
-    # Initialize config, servers, LLM client, and chat session only once
-    if "chat_session" not in st.session_state:
-        config = Configuration()
-        server_config = config.load_config("servers_config.json")
-        servers = [
-            Server(name, srv_config)
-            for name, srv_config in server_config["mcpServers"].items()
-        ]
-        llm_client = LLMClient(config.llm_api_key)
-        chat_session = ChatSession(servers, llm_client)
-        st.session_state.chat_session = chat_session
-        st.session_state.conversation = []
-    else:
-        chat_session = st.session_state.chat_session
+def create_interface():
+    with gr.Blocks() as demo:
+        tabs = ["Configure credentials", "Setup channels", "Setup tasks", "Monitor tasks", "Test MCP"]
+        gr.Markdown("## MCP Control Panel")
 
-    # Display conversation so far
-    if "conversation" not in st.session_state:
-        st.session_state.conversation = []
+        selected_tab = gr.Dropdown(tabs, label="Navigation", value="Monitor tasks")
+        tab_title = gr.Markdown("Monitor tasks")
 
-    for msg in st.session_state.conversation:
-        if msg["role"] == "user":
-            st.markdown(f"**You:** {msg['content']}")
-        elif msg["role"] == "assistant":
-            st.markdown(f"**Assistant:** {msg['content']}")
-        elif msg["role"] == "system":
-            st.info(msg["content"])
+        result_output = gr.Textbox(label="Result", interactive=False)
 
-    def handle_submit():
-        user_input = st.session_state.user_input.strip()
-        if user_input:
-            updated_convo = chat_session.process_message_sync(user_input)
-            st.session_state.conversation = updated_convo
-            st.session_state.user_input = ""  # Clear input box
+        # Buttons for each tab
+        setup_gmail_btn = gr.Button("Setup Gmail", visible=False)
+        setup_github_btn = gr.Button("Setup GitHub", visible=False)
+        listen_gmail_btn = gr.Button("Listen to Gmail", visible=False)
+        setup_github_task_btn = gr.Button("Setup GitHub Task", visible=False)
+        test_input = gr.Textbox(label="Command to send to MCP", visible=False)
+        send_command_btn = gr.Button("Send Command", visible=False)
 
-    st.text_input("Type your message:", key="user_input", on_change=handle_submit)
+        # Bindings
+        selected_tab.change(fn=render_tab, inputs=[selected_tab],
+                            outputs=[tab_title,
+                                    setup_gmail_btn, setup_github_btn,
+                                    listen_gmail_btn, setup_github_task_btn,
+                                    test_input, send_command_btn,
+                                    result_output])
+
+        setup_gmail_btn.click(fn=lambda: configure_credentials("Gmail"), outputs=result_output)
+        setup_github_btn.click(fn=lambda: configure_credentials("GitHub"), outputs=result_output)
+        listen_gmail_btn.click(fn=setup_channels, outputs=result_output)
+        setup_github_task_btn.click(fn=setup_tasks, outputs=result_output)
+        send_command_btn.click(fn=process_message, inputs=test_input, outputs=result_output)
+
+        test_input.submit(fn=process_message_and_clear, inputs=test_input, outputs=[result_output, test_input])
+        
+    return demo
+
+async def async_init():
+    global chatmanager, exit_stack
+    
+    logging.info("Initializing async components...")
+
+    config = Configuration()
+    server_config = config.load_config("servers_config.json")
+    exit_stack = AsyncExitStack()
+
+    servers = [
+        MCPManager(name, srv_config, exit_stack)
+        for name, srv_config in server_config["mcpServers"].items()
+    ]
+    llm_client = LLMClient(config.llm_api_key)
+    chatmanager = ChatManager(servers, llm_client)
+    await chatmanager.initialize()
+
+    logging.info("Async initialization complete")
+
+async def cleanup():
+    """Cleanup function to be called on shutdown"""
+    global chatmanager, exit_stack
+    
+    logging.info("Starting cleanup...")
+    
+    if chatmanager:
+        try:
+            await chatmanager.cleanup()
+        except Exception as e:
+            logging.error(f"Error during chat manager cleanup: {e}")
+    
+    if exit_stack:
+        try:
+            await exit_stack.aclose()
+            logging.info("Exit stack closed successfully")
+        except Exception as e:
+            logging.error(f"Error closing exit stack: {e}")
+    
+    logging.info("Cleanup complete")
+
+async def run_app():
+    """Run the application with async lifecycle management"""
+    global loop
+
+    try:
+        loop = asyncio.get_event_loop()
+
+        # Initialize async components
+        await async_init()
+
+        # Create and configure Gradio interface
+        demo = create_interface()
+        demo.queue()
+        
+        # Start Gradio in a separate thread but keep this event loop running
+
+        gradio_ready = threading.Event()
+        
+        # Start Gradio in a separate thread
+        def start_gradio():
+            try:
+                demo.launch(share=False, server_name="127.0.0.1", server_port=7860)
+                gradio_ready.set()
+            except Exception as e:
+                logging.error(f"Error starting Gradio: {e}")
+                gradio_ready.set()  # Set event even on error to avoid hanging
+        
+        gradio_thread = threading.Thread(target=start_gradio, daemon=True)
+        gradio_thread.start()
+        
+        # Wait a bit for Gradio to start
+        await asyncio.sleep(2)
+        
+        logging.info("Gradio server started, keeping event loop alive...")
+               
+        # Keep the event loop alive
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("Received shutdown signal")
+            
+    except Exception as e:
+        logging.error(f"Error in main application: {e}")
+        raise
+    finally:
+        # Cleanup
+        await cleanup()
+
+if __name__ == "__main__":    
+    # Run the application
+    try:
+        asyncio.run(run_app())
+    except KeyboardInterrupt:
+        logging.info("Application shutdown requested")
+    except Exception as e:
+        logging.error(f"Application error: {e}")
+        raise
