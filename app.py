@@ -3,6 +3,7 @@ import gradio as gr
 import asyncio
 import logging
 import threading
+import os
 from configuration import Configuration
 from mcp_manager import MCPManager
 from chat_manager import ChatManager
@@ -19,6 +20,20 @@ def setup_channels():
     return "Started listening to Gmail ✅"
 
 def setup_tasks():
+    process_message("navigate to github.com")
+    process_message("Find sign in button on the page")
+    process_message("Click sign in button")
+    process_message("Find username input box on the page")
+    process_message("Click on username input box to make sure it is in focus")
+    process_message("Slowly fill in username as vasiliy@live.com into username input box that is currently in focus")
+
+    process_message("Find password input box on the page")
+    process_message("Click on password input box to make sure it is in focus")
+    github_password = os.environ.get("GITHUB_PASSWORD", "")
+    process_message("Slowly fill in password as " + github_password + " into password input box that is currently in focus")
+
+    process_message("Find sign in button on the page")
+    process_message("Click sign in button") 
     return "GitHub task setup complete ✅"
 
 def monitor_tasks():
@@ -145,7 +160,7 @@ async def async_init():
         for name, srv_config in server_config["mcpServers"].items()
     ]
     llm_client = LLMClient(config.llm_api_key)
-    chatmanager = ChatManager(servers, llm_client)
+    chatmanager = ChatManager(servers, llm_client, True)
     await chatmanager.initialize()
 
     logging.info("Async initialization complete")
@@ -192,7 +207,7 @@ async def run_app():
         # Start Gradio in a separate thread
         def start_gradio():
             try:
-                demo.launch(share=False, server_name="127.0.0.1", server_port=7860)
+                demo.launch(share=False, server_name="127.0.0.1", server_port=7861)
                 gradio_ready.set()
             except Exception as e:
                 logging.error(f"Error starting Gradio: {e}")

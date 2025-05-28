@@ -15,12 +15,15 @@ logging.basicConfig(
 class ChatManager:
     """Orchestrates the interaction between user, LLM, and tools."""
 
-    def __init__(self, servers: list[MCPManager], llm_client: LLMClient) -> None:
+    def __init__(self, servers: list[MCPManager], llm_client: LLMClient, verbose_logging: bool) -> None:
         self.servers: list[MCPManager] = servers
         self.llm_client: LLMClient = llm_client
         self.tools_description: str = ""
         self.initialized: bool = False
         self.conversation: list[dict[str, str]] = []
+        self.verbose_logging: bool = verbose_logging
+        self.tool_log_file: str = "tool.log"
+        self.max_tool_response_length: int = 8000
 
     def get_tools_description(self):
         return self.tools_description
@@ -101,10 +104,6 @@ class ChatManager:
         except json.JSONDecodeError:
             return llm_response
 
-    async def test(self) -> str:
-        logging.info("Testing Chat manager")
-        await self.servers[0].test()
-
     async def process_message(self, user_input: str) -> str:
         if not self.initialized:
             await self.initialize()
@@ -116,19 +115,24 @@ class ChatManager:
                 all_tools.extend(tools)
             self.tools_description = "\n".join([tool.format_for_llm() for tool in all_tools])
 
-        print("User input:", user_input)
-        logging.info("Processing user input")
+        logging.info("Processing user input:" + user_input)
         self.conversation.append({"role": "user", "content": user_input})
         response = self.llm_client.get_response(self.conversation + [self.get_system_message()])
         self.conversation.append({"role": "assistant", "content": response})
         logging.info(f"Got LLM response:{response}")
 
         result = await self.process_llm_response(response)
+        if (len(result) > self.max_tool_response_length):
+            logging.info(f"Tool response is longer than {self.max_tool_response_length} characters, truncating")
+            if (self.verbose_logging):
+                logging.info("Writing tool response to log file")   
+                with open(self.tool_log_file, "w") as file:
+                    file.write(result)
+        result = result[:self.max_tool_response_length]
 
         if result != response:
             # Tool was called, so get final LLM response
-            self.conversation.append({"role": "system", "content": result})
-            response = self.llm_client.get_response(self.conversation + [self.get_system_message()])
+            response = self.llm_client.get_response(self.conversation + [{"role": "system", "content": result}] + [self.get_system_message()])
             self.conversation.append({"role": "assistant", "content": response})
             
         logging.info("Responded to user")

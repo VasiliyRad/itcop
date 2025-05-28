@@ -68,31 +68,6 @@ class MCPManager:
             logging.error(f"Error initializing client session: {e}")
             raise
 
-    async def test(self) -> None:
-            logging.info("Test tool execution")
-            tool_name = "browser_navigate"
-            arguments = {
-                "url": "https://www.bing.com"
-            }
-            await self.session.call_tool(tool_name, arguments)
-
-            logging.info("Done step 1")
-
-            arguments = {
-                "url": "https://www.google.com"
-            }
-            await self.session.call_tool(tool_name, arguments)
-            logging.info("Done step 2")
-
-            arguments = {
-                "url": "https://www.msn.com",
-                "waitUntil": ["load", "domcontentloaded"],
-                "timeout": 10000,
-            }
-            await self.session.call_tool(tool_name, arguments)
-            logging.info("Done step 3")
-
-
     async def list_tools(self) -> list[Any]:
         """List available tools from the server.
 

@@ -2,6 +2,7 @@ import logging
 import httpx
 import time
 import random
+import json
 from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic.networks import HttpUrl
@@ -11,6 +12,7 @@ class LLMClient:
 
     def __init__(self, api_key: str) -> None:
         self.api_key: str = api_key
+        self.delay: float = 0.0  # Delay in seconds for rate limiting
 
     def get_response_claude(self, messages: list[dict[str, str]]) -> str:
         url = "https://api.anthropic.com/v1/messages"
@@ -91,21 +93,43 @@ class LLMClient:
 
         timeout = httpx.Timeout(60.0) 
 
-        for attempt in range(2):  # 0 and 1 (original + 1 retry)
+        for attempt in range(4):
             try:
                 with httpx.Client(timeout=timeout) as client:
                     response = client.post(url, headers=headers, json=payload)
                     response.raise_for_status()
+
+                    self.delay = 0.0  # Reset delay on successful response 
+                    # Log rate limit headers
+                    for header_name, header_value in response.headers.items():
+                        if header_name.lower().startswith('x-ratelimit'):
+                            logging.info(f"Rate limit header: {header_name}: {header_value}")
+                            if (header_name.lower() == 'x-ratelimit-reset-tokens'):
+                                self.delay = float(header_value.rstrip('s'))
+                                logging.info(f"Rate limit reset delay set to {self.delay:.1f} seconds")
+                
                     data = response.json()
                     return data["choices"][0]["message"]["content"]
 
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429 and attempt == 0:
-                    # Wait 5-20 seconds before retry
-                    wait_time = random.uniform(5, 20)
-                    logging.warning(f"Rate limited (429), waiting {wait_time:.1f}s before retry...")
+                if e.response.status_code == 429 and attempt < 3:
+
+                    if self.delay > 0:
+                        wait_time = self.delay
+                        logging.warning(f"Rate limited (429), waiting {wait_time:.1f}s before retry...")
+                        self.delay = 0.0  # Reset delay after using it
+                    else:
+                        wait_time = random.uniform(10, 20)
+                        logging.warning(f"Rate limited (429), waiting {wait_time:.1f}s before retry...")
+
                     time.sleep(wait_time)
                     continue
+                elif e.response.status_code == 400:
+                    # Log input messages for debugging 400 Bad Request errors
+                    with open("bad_request.json", "w") as f:
+                        json.dump(payload, f, indent=4)
+                    logging.error(f"400 Bad Request. Check bad_request.json to inspect input messages.")
+                    raise
                 else:
                     # Re-raise for other status codes or final attempt
                     raise
