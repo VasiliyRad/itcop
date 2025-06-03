@@ -15,24 +15,78 @@ logging.basicConfig(
 class ChatManager:
     """Orchestrates the interaction between user, LLM, and tools."""
 
-    def __init__(self, servers: list[MCPManager], llm_client: LLMClient, verbose_logging: bool) -> None:
+    def __init__(self, servers: list[MCPManager], llm_client: LLMClient) -> None:
         self.servers: list[MCPManager] = servers
         self.llm_client: LLMClient = llm_client
         self.tools_description: str = ""
         self.initialized: bool = False
         self.conversation: list[dict[str, str]] = []
-        self.verbose_logging: bool = verbose_logging
-        self.tool_log_file: str = "tool.log"
-        self.max_tool_response_length: int = 8000
 
     def get_tools_description(self):
         return self.tools_description
-
+    
     def get_system_message(self):
         return {
             "role": "system",
             "content": (
-                "You are a helpful assistant with access to these tools:\n\n"
+                "You are a browser automation assistant. Your ONLY job is to execute commands and confirm completion.\n"
+                "CRITICAL RULES:\n"
+                "- Execute the requested action using the appropriate tool\n"
+                "- Respond with ONLY a brief confirmation (e.g., 'Navigated to github.com' or 'Error: [description]')\n"
+                "- DO NOT analyze, summarize, or describe page content\n"
+                "- DO NOT provide additional commentary unless explicitly asked\n"
+                "You have access to these tools:\n\n"
+                f"{self.tools_description}\n"
+                "Choose the appropriate tool based on the user's question. "
+                "If no tool is needed, reply directly.\n\n"
+                "IMPORTANT: When you need to use a tool, you must ONLY respond with"
+                "the exact JSON object format below, nothing else:\n"
+                "{\n"
+                '    \"tool\": \"tool-name\",\n'
+                '    \"arguments\": {\n'
+                '        \"argument-name\": \"value\"\n'
+                "    }\n"
+                "}\n\n"
+                "After receive tools response, provide only a brief status update.\n"
+                "EXAMPLES:\n\n"
+            "Input: Navigate to github.com\n"
+            "Output: {\n"
+            '    \"tool\": \"browser_navigate\",\n'
+            '    \"arguments\": {\n'
+            '        \"url\": \"https://github.com\"\n'
+            "    }\n"
+            "}\n\n"
+            "Input: Click on sign in link\n"
+            "Output: {\n"
+            '    \"tool\": \"browser_click\",\n'
+            '    \"arguments\": {\n'
+            '        \"element\": \"Sign in link\",\n'
+            '        \"ref\": \"e70\"\n'
+            "    }\n"
+            "}\n\n"
+            "Input: Find username input box on the page\n"
+            "Output: {\n"
+            '    \"tool\": \"browser_snapshot\",\n'
+            '    \"arguments\": {}\n'
+            "}\n\n"
+            "Input: Slowly fill in username as vasiliy@live.com into username input box\n"
+            "Output: {\n"
+            '    \"tool\": \"browser_type\",\n'
+            '    \"arguments\": {\n'
+            '        \"element\": \"Username input box\",\n'
+            '        \"ref\": \"e60\",\n'
+            '        \"text\": \"vasiliy@live.com\"\n'
+            "    }\n"
+            "}\n\n"
+                "Please use only the tools that are explicitly defined above."
+            )
+        }
+
+    def get_system_message_old(self):
+        return {
+            "role": "system",
+            "content": (
+                "You are a web browser automation agent with access to these tools:\n\n"
                 f"{self.tools_description}\n"
                 "Choose the appropriate tool based on the user's question. "
                 "If no tool is needed, reply directly.\n\n"
@@ -45,11 +99,12 @@ class ChatManager:
                 "    }\n"
                 "}\n\n"
                 "After receiving a tool's response:\n"
-                "1. Transform the raw data into a natural, conversational response\n"
+                "1. Explain what action was taken using a natural, conversational response\n"
                 "2. Keep responses concise but informative\n"
                 "3. Focus on the most relevant information\n"
                 "4. Use appropriate context from the user's question\n"
                 "5. Avoid simply repeating the raw data\n\n"
+                "6. Inform the user about any errors or issues with the tool execution\n"
                 "Please use only the tools that are explicitly defined above."
             )
         }
@@ -117,23 +172,33 @@ class ChatManager:
 
         logging.info("Processing user input:" + user_input)
         self.conversation.append({"role": "user", "content": user_input})
-        response = self.llm_client.get_response(self.conversation + [self.get_system_message()])
+        response = self.llm_client.get_response(self.get_system_message(), self.conversation)
         self.conversation.append({"role": "assistant", "content": response})
         logging.info(f"Got LLM response:{response}")
 
-        result = await self.process_llm_response(response)
-        if (len(result) > self.max_tool_response_length):
-            logging.info(f"Tool response is longer than {self.max_tool_response_length} characters, truncating")
-            if (self.verbose_logging):
-                logging.info("Writing tool response to log file")   
-                with open(self.tool_log_file, "w") as file:
-                    file.write(result)
-        result = result[:self.max_tool_response_length]
+        max_iterations = 20
+        iteration_count = 0
 
-        if result != response:
-            # Tool was called, so get final LLM response
-            response = self.llm_client.get_response(self.conversation + [{"role": "system", "content": result}] + [self.get_system_message()])
+        while iteration_count < max_iterations:
+            result = await self.process_llm_response(response)
+
+            if result == response:
+                logging.info("No tool called, ending loop")
+                break
+
+            iteration_count += 1
+            logging.info(f"Tool iteration {iteration_count}: processing tool result")
+        
+            # Append tool result to conversation history
+            messages = self.llm_client.append_tool_response(result, self.conversation)
+
+            # Get next LLM response based on tool result
+            response = self.llm_client.get_response(self.get_system_message(), messages=messages)
             self.conversation.append({"role": "assistant", "content": response})
+            logging.info(f"Got LLM response after tool call {iteration_count}: {response}")
+
+        if iteration_count >= max_iterations:
+            logging.warning(f"Reached maximum tool iterations ({max_iterations})")
             
         logging.info("Responded to user")
         return response
