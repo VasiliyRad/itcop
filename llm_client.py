@@ -9,7 +9,9 @@ from ollama import ChatResponse
 from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic.networks import HttpUrl
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import concurrent.futures
 from abc import ABC, abstractmethod
 
 class LLMClient(ABC):
@@ -130,7 +132,69 @@ class ClaudeLLMClient(LLMClient):
             )
 
 class LocalQwenLLMClient(LLMClient):
-    """LLM client for local Qwen (Ollama)."""
+    """LLM client for local Qwen (from huggingface)."""
+
+    def __init__(self, api_key: str = None, model_name: str = "Qwen/Qwen3-8B") -> None:
+        super().__init__(api_key)
+        self.model_name = model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            torch_dtype="auto",
+            device_map="auto"
+        )
+        logging.info(f"Loaded model and tokenizer for {self.model_name}")
+
+    def get_max_tool_response_length(self) -> int:
+        return 2000 # 16000
+    
+    def include_tool_results_in_history(self) -> bool:
+        return True
+
+    def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+        input_messages = [system_prompt] + messages
+
+        logging.info(f"Getting response from local LLM. Input:")
+        for message in input_messages:
+            logging.info(f"role: {message['role']}, content: {message['content'][:300]}")
+
+        text = self.tokenizer.apply_chat_template(
+            input_messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=True # Switches between thinking and non-thinking modes. Default is True.
+        )
+        logging.info(f"Tokenized input text")
+        model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    self.model.generate,
+                    **model_inputs,
+                    max_new_tokens=2048
+                )
+                generated_ids = future.result(timeout=120)
+            logging.info(f"Got response from LLM")
+        except concurrent.futures.TimeoutError:
+            logging.error("model.generate timed out after 120 seconds")
+            return "error: model.generate timed out after 120 seconds"
+        output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
+        try:
+            # rindex finding 151668 (</think>)
+            index = len(output_ids) - output_ids[::-1].index(151668)
+            logging.info(f"Found </think> token at index: {index}")
+        except ValueError:
+            index = 0
+            logging.info(f"</think> token not found in the output.")
+        
+        thinking_content = self.tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip("\n")
+        logging.info(f"LLM response with thinking pattern: {thinking_content}")
+        content = self.tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
+        logging.info(f"LLM response: {content}")
+        return content
+
+class LocalQwenOlamaLLMClient(LLMClient):
+    """LLM client for local Qwen (from olama)."""
 
     def get_max_tool_response_length(self) -> int:
         return 16000

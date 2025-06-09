@@ -54,7 +54,7 @@ def process_message(command):
             chatmanager.process_message(command), loop
         )
         # Wait for result with timeout
-        result = future.result(timeout=150)
+        result = future.result(timeout=210)
         return result
     except asyncio.TimeoutError:
         return f"Error: Command timed out, command: {command}"
@@ -159,7 +159,7 @@ async def async_init():
         MCPManager(name, srv_config, exit_stack)
         for name, srv_config in server_config["mcpServers"].items()
     ]
-    llm_client = ChatGPTLLMClient(config.llm_api_key)
+    llm_client = LocalQwenLLMClient(config.llm_api_key)
     chatmanager = ChatManager(servers, llm_client)
     await chatmanager.initialize()
 
