@@ -24,10 +24,33 @@ class LLMClient(ABC):
         self.json_code_block_pattern = r'```json\s*(.*?)\s*```'
         self.verbose_logging: bool = True
         self.tool_log_file: str = "tool.log"
+        self.cache_file: str = "cache.json"
+        try:
+            with open(self.cache_file, "r") as f:
+                self.cache = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.cache = {}
+
+    def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+        """Get a response from the LLM provider, using cache if available."""
+        cache_key = json.dumps({"system_prompt": system_prompt, "messages": messages}, sort_keys=True)
+        if cache_key in self.cache:
+            logging.info("Cache hit for request.")
+            return self.cache[cache_key]
+        else:
+            logging.info("Cache miss for request. Calling get_response_from_LLM.")
+            response = self.get_response_from_LLM(system_prompt, messages)
+            self.cache[cache_key] = response
+            try:
+                with open(self.cache_file, "w") as f:
+                    json.dump(self.cache, f)
+            except Exception as e:
+                logging.error(f"Failed to write cache to disk: {e}")
+            return response
 
     @abstractmethod
-    def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
-        """Get a response from the LLM provider."""
+    def get_response_from_LLM(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+        """Get a response from the LLM provider (no cache)."""
         pass
 
     @abstractmethod
@@ -79,7 +102,7 @@ class ClaudeLLMClient(LLMClient):
     def include_tool_results_in_history(self) -> bool:
         return True
 
-    def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+    def get_response_from_LLM(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
         url = "https://api.anthropic.com/v1/messages"
 
         headers = {
@@ -151,7 +174,7 @@ class LocalQwenLLMClient(LLMClient):
     def include_tool_results_in_history(self) -> bool:
         return True
 
-    def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+    def get_response_from_LLM(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
         input_messages = [system_prompt] + messages
 
         logging.info(f"Getting response from local LLM. Input:")
@@ -237,7 +260,7 @@ class ChatGPTLLMClient(LLMClient):
     def include_tool_results_in_history(self) -> bool:
         return False
 
-    def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
+    def get_response_from_LLM(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
         url = "https://api.openai.com/v1/chat/completions"
 
         headers = {
