@@ -6,7 +6,9 @@ import threading
 import os
 from configuration import Configuration
 from mcp_manager import MCPManager
-from chat_manager import ChatManager
+from navigationagent import NavigationAgent
+from pageanalysisagent import PageAnalysisAgent
+from conversationagent import ConversationAgent
 from llm_client import LocalQwenLLMClient, ChatGPTLLMClient
 
 chatmanager = None 
@@ -160,7 +162,11 @@ async def async_init():
         for name, srv_config in server_config["mcpServers"].items()
     ]
     llm_client = LocalQwenLLMClient(config.llm_api_key)
-    chatmanager = ChatManager(servers, llm_client)
+    navigation_agent = NavigationAgent(servers, llm_client)
+    page_analysis_agent = PageAnalysisAgent(llm_client)
+    chatmanager = ConversationAgent(llm_client, navigation_agent, page_analysis_agent)
+    await navigation_agent.initialize()
+    await page_analysis_agent.initialize()
     await chatmanager.initialize()
 
     logging.info("Async initialization complete")
