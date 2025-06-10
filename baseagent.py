@@ -30,9 +30,16 @@ class BaseAgent(ABC):
         pass
 
     @abstractmethod
-    def get_system_message(self) -> str:
+    def get_system_prompt(self) -> str:
         """Get system prompt for the agent."""
         pass
+
+    def get_system_message(self) -> dict[str, str]:
+        """Get system message for the agent."""
+        return {
+            "role": "system",
+            "content": self.get_system_prompt()
+        }
 
     async def cleanup(self):
         """Cleanup resources and close connections."""

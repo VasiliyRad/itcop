@@ -19,7 +19,6 @@ class LLMClient(ABC):
 
     def __init__(self, api_key: str = None) -> None:
         self.api_key: Optional[str] = api_key
-        self.delay: float = 0.0  # Delay in seconds for rate limiting
         self.thinking_pattern = r'<think>.*?</think>'
         self.json_code_block_pattern = r'```json\s*(.*?)\s*```'
         self.verbose_logging: bool = True
@@ -251,6 +250,10 @@ class LocalQwenOlamaLLMClient(LLMClient):
 
 class ChatGPTLLMClient(LLMClient):
     """LLM client for OpenAI ChatGPT."""
+
+    def __init__(self, api_key: str = None) -> None:
+        super().__init__(api_key)
+        self.delay: float = 0.0  # Rate limiting delay
 
     # chatgpt cheap pricing tier limit: 8000
     def get_max_tool_response_length(self) -> int:

@@ -11,10 +11,8 @@ class ConversationAgent(BaseAgent):
         self.navigation_agent = navigation_agent
         self.page_analysis_agent = page_analysis_agent
 
-    def get_system_message(self) -> dict[str, str]:
-        return {
-            "role": "system",
-            "content": (
+    def get_system_prompt(self) -> str:
+        return (
             "You are a conversation agent. You can browse the web or analyze the current page. "
             "You have access to these tools:\n\n"
             f"{self.tools_description}\n"
@@ -29,7 +27,7 @@ class ConversationAgent(BaseAgent):
             "    }\n"
             "}\n\n"
             "After receive tools response, provide only a brief status update.\n"
-        )}
+        )
 
     async def execute_tool(self, tool_name: str, arguments: dict):
         if tool_name == "browse_web":

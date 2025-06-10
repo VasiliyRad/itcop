@@ -22,10 +22,8 @@ class NavigationAgent(BaseAgent):
         await super().initialize()
         logging.info("Navigation agent initialized with tools")
 
-    def get_system_message(self) -> dict[str, str]:
-        return {
-            "role": "system",
-            "content": (
+    def get_system_prompt(self) -> str:
+        return (
                 "You are a browser automation assistant. Your ONLY job is to execute commands and confirm completion.\n"
                 "CRITICAL RULES:\n"
                 "- Execute the requested action using the appropriate tool\n"
@@ -77,7 +75,6 @@ class NavigationAgent(BaseAgent):
             "}\n\n"
                 "Please use only the tools that are explicitly defined above."
             )
-        }
 
     async def cleanup(self):
         """Cleanup resources and close connections."""
