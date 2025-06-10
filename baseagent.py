@@ -4,10 +4,15 @@ from typing import Optional, Any
 from llm_client import LLMClient
 from tool import Tool
 from abc import ABC, abstractmethod
+from taskresult import TaskResult
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+class AgentConfig:
+    MAX_TOOL_ITERATIONS = 20
+    TOOL_RESULT_DEBUG_LIMIT = 2000
 
 class BaseAgent(ABC):
     """Base Agent class."""
@@ -89,7 +94,7 @@ class BaseAgent(ABC):
         self.conversation.append({"role": "assistant", "content": response})
         logging.info(f"Got LLM response:{response}")
 
-        max_iterations = 20
+        max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
         iteration_count = 0
 
         while iteration_count < max_iterations:
@@ -115,3 +120,51 @@ class BaseAgent(ABC):
             
         logging.info("Responded to user")
         return response
+
+    async def process_task(self, request: str) -> TaskResult:
+        """
+        Process a single-turn task with the LLM and tools.
+        Args:
+            request (str): The user request.
+        Returns:
+            TaskResult: Contains the final response and last tool context (if any).
+        """
+        if not self.initialized:
+            await self.initialize()
+
+        logging.info("Processing single-turn task: " + request + " by agent " + self.__class__.__name__)
+
+        # Prepare conversation: system + single user turn
+        conversation = [{"role": "user", "content": request}]
+        system_message = self.get_system_message()
+        response = self.llm_client.get_response(system_message, conversation)
+        logging.info(f"Got LLM response: {response}")
+
+        max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
+        iteration_count = 0
+        last_tool_result = ""
+
+        while iteration_count < max_iterations:
+            result = await self.process_llm_response(response)
+
+            if result == response:
+                logging.info("No tool called, ending loop")
+                break
+
+            iteration_count += 1
+            logging.info(f"Tool iteration {iteration_count}: processing tool result")
+
+            # Save last tool result for context
+            last_tool_result = result
+
+            # Prepare new messages: system + user + tool result
+            # Debugging: reduce tool result to first 2000 characters
+            messages = self.llm_client.append_tool_response(result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT], [{"role": "user", "content": request}])
+            response = self.llm_client.get_response(system_message, messages=messages)
+            logging.info(f"Got LLM response after tool call {iteration_count}: {response}")
+
+        if iteration_count >= max_iterations:
+            logging.warning(f"Reached maximum tool iterations ({max_iterations})")
+
+        logging.info("Responded to single-turn task")
+        return TaskResult(response=response, context=last_tool_result)

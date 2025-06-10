@@ -1,5 +1,7 @@
 from baseagent import BaseAgent
 from tool import Tool
+from taskresult import TaskResult
+import logging
 
 class ConversationAgent(BaseAgent):
     """
@@ -10,6 +12,7 @@ class ConversationAgent(BaseAgent):
         super().__init__(llm_client)
         self.navigation_agent = navigation_agent
         self.page_analysis_agent = page_analysis_agent
+        self.page_context = None
 
     def get_system_prompt(self) -> str:
         return (
@@ -31,11 +34,15 @@ class ConversationAgent(BaseAgent):
 
     async def execute_tool(self, tool_name: str, arguments: dict):
         if tool_name == "browse_web":
-            self.navigation_agent.reset_conversation()
-            return await self.navigation_agent.process_message(arguments.get("action", ""))
+            webtask_result = await self.navigation_agent.process_task(arguments.get("action", ""))
+            self.page_context = webtask_result.context
+            logging.info(f"Web task executed: {webtask_result.response}, page context updated. (length: {len(self.page_context)})")
+            return webtask_result.response
         elif tool_name == "analyze_page":
-            self.page_analysis_agent.reset_conversation()
-            return await self.page_analysis_agent.process_message(arguments.get("analysis_type", ""))
+            self.page_analysis_agent.set_page_context(self.page_context)
+            page_analysis_result = await self.page_analysis_agent.process_task(arguments.get("analysis_type", ""))
+            logging.info(f"Page analysis executed: {page_analysis_result.response}")
+            return page_analysis_result.response
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
         
@@ -59,7 +66,7 @@ class ConversationAgent(BaseAgent):
                 input_schema={ "properties": {
                     "analysis_type": {
                         "type": "string",
-                        "description": "Type of analysis to perform, e.g., 'find element IDs' or 'inspect page structure'."
+                        "description": "Type of analysis to perform, e.g., 'find element ID for sign in button', 'find element ID for search input field', 'find element ID for submit button', 'inspect page structure', 'find all clickable elements'. Always include the specific element you're looking for when searching for particular elements."
                     }
                 },
                 "required": ["analysis_type"]

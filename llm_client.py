@@ -14,6 +14,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import concurrent.futures
 from abc import ABC, abstractmethod
 
+class LLMConfig:
+    REMOTE_TIMEOUT = 60.0
+    LOCAL_TIMEOUT = 180
+
 class LLMClient(ABC):
     """Base class for LLM clients."""
 
@@ -30,6 +34,13 @@ class LLMClient(ABC):
         except (FileNotFoundError, json.JSONDecodeError):
             self.cache = {}
 
+    def _is_error_response(self, response: str) -> bool:
+        """Check if response indicates an error that shouldn't be cached."""
+        # Check for specific timeout error from LocalQwenLLMClient
+        if response.startswith("error: model.generate timed out"):
+            return True
+        return False
+    
     def get_response(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
         """Get a response from the LLM provider, using cache if available."""
         cache_key = json.dumps({"system_prompt": system_prompt, "messages": messages}, sort_keys=True)
@@ -39,7 +50,8 @@ class LLMClient(ABC):
         else:
             logging.info("Cache miss for request. Calling get_response_from_LLM.")
             response = self.get_response_from_LLM(system_prompt, messages)
-            self.cache[cache_key] = response
+            if not self._is_error_response(response):
+                self.cache[cache_key] = response
             try:
                 with open(self.cache_file, "w") as f:
                     json.dump(self.cache, f)
@@ -130,7 +142,7 @@ class ClaudeLLMClient(LLMClient):
             "messages": structured_messages,
         }
 
-        timeout = httpx.Timeout(60.0)
+        timeout = httpx.Timeout(LLMConfig.REMOTE_TIMEOUT)
 
         try:
             with httpx.Client(timeout=timeout) as client:
@@ -168,7 +180,7 @@ class LocalQwenLLMClient(LLMClient):
         logging.info(f"Loaded model and tokenizer for {self.model_name}")
 
     def get_max_tool_response_length(self) -> int:
-        return 2000 # 16000
+        return 16000
     
     def include_tool_results_in_history(self) -> bool:
         return True
@@ -195,11 +207,11 @@ class LocalQwenLLMClient(LLMClient):
                     **model_inputs,
                     max_new_tokens=2048
                 )
-                generated_ids = future.result(timeout=120)
+                generated_ids = future.result(timeout=LLMConfig.LOCAL_TIMEOUT)
             logging.info(f"Got response from LLM")
         except concurrent.futures.TimeoutError:
-            logging.error("model.generate timed out after 120 seconds")
-            return "error: model.generate timed out after 120 seconds"
+            logging.error("model.generate timed out after 180 seconds")
+            return "error: model.generate timed out after 180 seconds"
         output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
         try:
             # rindex finding 151668 (</think>)
@@ -233,7 +245,7 @@ class LocalQwenOlamaLLMClient(LLMClient):
 
         try:
             # model='qwen3:32b', model='qwen3:8b', model='llama3.2'
-            response: ChatResponse = chat(model='qwen3:8b', messages=input_messages, options={'timeout': 120})
+            response: ChatResponse = chat(model='qwen3:8b', messages=input_messages, options={'timeout': LLMConfig.LOCAL_TIMEOUT})
         except Exception as e:
             logging.error(f"Exception when running local model: {e}")
             return "error!"
@@ -287,7 +299,7 @@ class ChatGPTLLMClient(LLMClient):
             "top_p": 1.0
         }
 
-        timeout = httpx.Timeout(60.0)
+        timeout = httpx.Timeout(LLMConfig.REMOTE_TIMEOUT)
 
         for attempt in range(4):
             try:
