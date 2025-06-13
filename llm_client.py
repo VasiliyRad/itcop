@@ -275,6 +275,24 @@ class ChatGPTLLMClient(LLMClient):
     def include_tool_results_in_history(self) -> bool:
         return False
 
+    def parse_delay(self, header_value):
+    # Parses delay value with support for different time units.
+    # Supports: 's' (seconds), 'ms' (milliseconds), 'm' (minutes)
+        header_value = header_value.strip().lower()
+    
+        if header_value.endswith('ms'):
+            # Milliseconds - convert to seconds
+            return float(header_value[:-2]) / 1000.0
+        elif header_value.endswith('m'):
+            # Minutes - convert to seconds
+            return float(header_value[:-1]) * 60.0
+        elif header_value.endswith('s'):
+            # Seconds
+            return float(header_value[:-1])
+        else:
+            # Default to seconds if no unit specified
+            return float(header_value)
+
     def get_response_from_LLM(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
         url = "https://api.openai.com/v1/chat/completions"
 
@@ -292,7 +310,7 @@ class ChatGPTLLMClient(LLMClient):
             structured_messages.append({"role": role, "content": content})
 
         payload = {
-            "model": "gpt-4o",  # or "gpt-4-turbo", "gpt-3.5-turbo", etc.
+            "model": "gpt-4.1-mini",  # or "gpt-4-turbo", "gpt-3.5-turbo", etc.
             "messages": structured_messages,
             "max_tokens": 4096,
             "temperature": 0.7,
@@ -313,7 +331,7 @@ class ChatGPTLLMClient(LLMClient):
                         if header_name.lower().startswith('x-ratelimit'):
                             logging.info(f"Rate limit header: {header_name}: {header_value}")
                             if (header_name.lower() == 'x-ratelimit-reset-tokens'):
-                                self.delay = float(header_value.rstrip('s'))
+                                self.delay = self.parse_delay(header_value)
                                 logging.info(f"Rate limit reset delay set to {self.delay:.1f} seconds")
                 
                     data = response.json()
