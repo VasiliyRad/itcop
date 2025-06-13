@@ -9,10 +9,16 @@ from mcp_manager import MCPManager
 from navigationagent import NavigationAgent
 from pageanalysisagent import PageAnalysisAgent
 from conversationagent import ConversationAgent
+from planningagent import PlanningAgent
 from llm_client import LocalQwenLLMClient, ChatGPTLLMClient
+from task_storage import TaskStorage
+from automation_task import AutomationTask
 
-chatmanager = None 
+chatmanager = None
+planning_agent = None
 exit_stack = None
+task_storage = None
+loop = None
 
 # Handlers
 def configure_credentials(action):
@@ -43,7 +49,6 @@ def monitor_tasks():
 
 def process_message(command):
     global loop, chatmanager
-    
     if not loop or not chatmanager:
         return "Error: System not initialized"
     
@@ -64,10 +69,29 @@ def process_message(command):
         logging.error(f"Error in process_message: {e}")
         return f"Error: {str(e)}"
 
-def process_message_and_clear(command):
-    """Process message and return both result and empty string to clear input"""
-    result = process_message(command)
-    return result, ""
+def process_planning_message(command):
+    global loop, planning_agent
+    if not loop or not planning_agent:
+        return "Error: System not initialized"
+
+    if not command.strip():
+        return "Please enter a command"
+    
+    try:
+        logging.info(f"Processing planning command: {command}")
+
+        # Schedule the coroutine on the event loop and wait for result
+        future = asyncio.run_coroutine_threadsafe(
+            planning_agent.process_message(command), loop
+        )
+        # Wait for result with timeout
+        result = future.result(timeout=210)
+        return result
+    except asyncio.TimeoutError:
+        return f"Error: Command timed out, command: {command}"
+    except Exception as e:
+        logging.error(f"Error in process_message: {e}")
+        return f"Error: {str(e)}"
 
 # Tab content functions
 def render_tab(tab, command_input=""):
@@ -77,7 +101,7 @@ def render_tab(tab, command_input=""):
             gr.update(visible=True), gr.update(visible=True),
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
-            ""
+            "", gr.update(visible=False)
         )
     elif tab == "Setup channels":
         return (
@@ -85,15 +109,15 @@ def render_tab(tab, command_input=""):
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=True), gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
-            ""
+            "", gr.update(visible=False)
         )
     elif tab == "Setup tasks":
         return (
-            "Setup tasks",
+            "Setup automation tasks",
             gr.update(visible=False), gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=True),
             gr.update(visible=False), gr.update(visible=False),
-            ""
+            gr.update(visible=False), gr.update(visible=False),
+            "", gr.update(visible=True)
         )
     elif tab == "Monitor tasks":
         return (
@@ -101,7 +125,7 @@ def render_tab(tab, command_input=""):
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
-            monitor_tasks()
+            monitor_tasks(), gr.update(visible=False)
         )
     elif tab == "Test MCP":
         return (
@@ -109,7 +133,25 @@ def render_tab(tab, command_input=""):
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=True), gr.update(visible=True),
-            ""
+            "", gr.update(visible=False)
+        )
+
+def is_empty_response(response):
+    return not response or response.strip() == "[]"
+
+def handle_submit_task(name, description):
+    response = process_planning_message(description)
+
+    if is_empty_response(response):
+        task = AutomationTask(id="new", name=name, description=description)
+        task_storage.addTask(task)
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+    else:
+        return (
+            gr.update(value=response, visible=True),
+            gr.update(value="", visible=True),
+            gr.update(visible=True),
+            gr.update(visible=True)
         )
 
 def create_interface():
@@ -120,7 +162,7 @@ def create_interface():
         selected_tab = gr.Dropdown(tabs, label="Navigation", value="Monitor tasks")
         tab_title = gr.Markdown("Monitor tasks")
 
-        result_output = gr.Textbox(label="Result", interactive=False)
+        result_output = gr.Textbox(label="Result", interactive=False, visible=False)
 
         # Buttons for each tab
         setup_gmail_btn = gr.Button("Setup Gmail", visible=False)
@@ -130,26 +172,77 @@ def create_interface():
         test_input = gr.Textbox(label="Command to send to MCP", visible=False)
         send_command_btn = gr.Button("Send Command", visible=False)
 
+        # --- Setup Tasks Tab UI ---
+        with gr.Column(visible=False) as setup_tasks_tab:
+            gr.Markdown("### Existing Tasks")
+            # List of tasks with placeholder edit buttons
+            def get_task_table():
+                global task_storage
+                if task_storage is None:
+                    return []
+                return [
+                    [task.name, task.description or "", "Edit"] for task in task_storage.listTasks()
+                ]
+            task_list = gr.Dataframe(
+                headers=["Name", "Description", "Edit"],
+                datatype=["str", "str", "str"],
+                interactive=False,
+                value=get_task_table(),
+                elem_id="task-list"
+            )
+            gr.Markdown("---")
+            gr.Markdown("### Define New Task")
+            new_task_name = gr.Textbox(label="Task Name", interactive=True)
+            new_task_json = gr.Textbox(label="Task JSON", interactive=False)
+            new_task_description = gr.Textbox(label="Task Description", interactive=True)
+            submit_task_btn = gr.Button("Submit Information")
+
+            popup_response_text = gr.Textbox(label="Agent Question", visible=False, interactive=False)
+            popup_user_input = gr.Textbox(label="Your Answer", visible=False)
+            popup_answer_btn = gr.Button("Answer", visible=False)
+
+            submit_task_btn.click(
+                fn=handle_submit_task,
+                inputs=[new_task_name, new_task_description],
+                outputs=[
+                    popup_response_text,
+                    popup_user_input,
+                    popup_answer_btn,
+                    result_output  # optional: use it to indicate success or status
+                ]
+            )
+
+        # --- Setup Tasks Tab Logic ---
+        # Update Task JSON when name or description changes
+        def update_task_json(name, description):
+            import json
+            task = AutomationTask(id="new", name=name, description=description)
+            return json.dumps(task.to_dict(), indent=2)
+        new_task_name.change(fn=update_task_json, inputs=[new_task_name, new_task_description], outputs=new_task_json)
+        new_task_description.change(fn=update_task_json, inputs=[new_task_name, new_task_description], outputs=new_task_json)
+
         # Bindings
         selected_tab.change(fn=render_tab, inputs=[selected_tab],
                             outputs=[tab_title,
                                     setup_gmail_btn, setup_github_btn,
                                     listen_gmail_btn, setup_github_task_btn,
                                     test_input, send_command_btn,
-                                    result_output])
+                                    result_output,
+                                    setup_tasks_tab])
 
         setup_gmail_btn.click(fn=lambda: configure_credentials("Gmail"), outputs=result_output)
         setup_github_btn.click(fn=lambda: configure_credentials("GitHub"), outputs=result_output)
         listen_gmail_btn.click(fn=setup_channels, outputs=result_output)
         setup_github_task_btn.click(fn=setup_tasks, outputs=result_output)
         send_command_btn.click(fn=process_message, inputs=test_input, outputs=result_output)
+        popup_answer_btn.click(fn=process_planning_message, inputs=test_input, outputs=result_output)
 
-        test_input.submit(fn=process_message_and_clear, inputs=test_input, outputs=[result_output, test_input])
+        test_input.submit(fn=process_message, inputs=test_input, outputs=[result_output, test_input])
         
     return demo
 
 async def async_init():
-    global chatmanager, exit_stack
+    global chatmanager, exit_stack, task_storage, planning_agent
     
     logging.info("Initializing async components...")
 
@@ -161,10 +254,13 @@ async def async_init():
         MCPManager(name, srv_config, exit_stack)
         for name, srv_config in server_config["mcpServers"].items()
     ]
-    llm_client = LocalQwenLLMClient(config.llm_api_key)
+    llm_client = ChatGPTLLMClient(config.llm_api_key)
     navigation_agent = NavigationAgent(servers, llm_client)
     page_analysis_agent = PageAnalysisAgent(llm_client)
     chatmanager = ConversationAgent(llm_client, navigation_agent, page_analysis_agent)
+    planning_agent = PlanningAgent(llm_client)
+    task_storage = TaskStorage()
+    task_storage.initialize()
     await navigation_agent.initialize()
     await page_analysis_agent.initialize()
     await chatmanager.initialize()
@@ -183,6 +279,12 @@ async def cleanup():
         except Exception as e:
             logging.error(f"Error during chat manager cleanup: {e}")
     
+    if planning_agent:
+        try:
+            await planning_agent.cleanup()
+        except Exception as e:
+            logging.error(f"Error during planning agent cleanup: {e}")
+
     if exit_stack:
         try:
             await exit_stack.aclose()

@@ -63,7 +63,6 @@ class BaseAgent(ABC):
         self.tools = await self.get_tools()
         self.tools_description = "\n".join([tool.format_for_llm() for tool in self.tools])
         self.initialized = True
-        logging.info("BaseAgent initialized")
 
     async def process_llm_response(self, llm_response: str) -> str:
         import json
