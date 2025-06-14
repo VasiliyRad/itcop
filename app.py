@@ -1,4 +1,5 @@
 from contextlib import AsyncExitStack
+import json
 import gradio as gr
 import asyncio
 import logging
@@ -9,13 +10,13 @@ from mcp_manager import MCPManager
 from navigationagent import NavigationAgent
 from pageanalysisagent import PageAnalysisAgent
 from conversationagent import ConversationAgent
-from planningagent import PlanningAgent
+from taskplanner import TaskPlanner
 from llm_client import LocalQwenLLMClient, ChatGPTLLMClient
 from task_storage import TaskStorage
 from automation_task import AutomationTask
 
 chatmanager = None
-planning_agent = None
+task_planner = None
 exit_stack = None
 task_storage = None
 loop = None
@@ -69,30 +70,6 @@ def process_message(command):
         logging.error(f"Error in process_message: {e}")
         return f"Error: {str(e)}"
 
-def process_planning_message(command):
-    global loop, planning_agent
-    if not loop or not planning_agent:
-        return "Error: System not initialized"
-
-    if not command.strip():
-        return "Please enter a command"
-    
-    try:
-        logging.info(f"Processing planning command: {command}")
-
-        # Schedule the coroutine on the event loop and wait for result
-        future = asyncio.run_coroutine_threadsafe(
-            planning_agent.process_message(command), loop
-        )
-        # Wait for result with timeout
-        result = future.result(timeout=210)
-        return result
-    except asyncio.TimeoutError:
-        return f"Error: Command timed out, command: {command}"
-    except Exception as e:
-        logging.error(f"Error in process_message: {e}")
-        return f"Error: {str(e)}"
-
 # Tab content functions
 def render_tab(tab, command_input=""):
     if tab == "Configure credentials":
@@ -136,24 +113,25 @@ def render_tab(tab, command_input=""):
             "", gr.update(visible=False)
         )
 
-def is_empty_response(response):
-    return not response or response.strip() == "[]"
-
 def handle_submit_task(name, description):
-    response = process_planning_message(description)
-
-    if is_empty_response(response):
-        task = AutomationTask(id="new", name=name, description=description)
-        task_storage.addTask(task)
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
-    else:
+    info_is_missing = task_planner.check_for_missing_information(description)
+    if info_is_missing:
         return (
-            gr.update(value=response, visible=True),
+            gr.update(value=task_planner.prepare_question(), visible=True),
             gr.update(value="", visible=True),
             gr.update(visible=True),
-            gr.update(visible=True)
+            gr.update(visible=False)
         )
-
+    else:
+        task = AutomationTask(id="new", name=name, description=description)
+        task_storage.addTask(task)
+        return (
+            gr.update(value="Task submitted successfully!", visible=True),
+            gr.update(value="", visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False)
+        )
+    
 def create_interface():
     with gr.Blocks() as demo:
         tabs = ["Configure credentials", "Setup channels", "Setup tasks", "Monitor tasks", "Test MCP"]
@@ -198,7 +176,7 @@ def create_interface():
             submit_task_btn = gr.Button("Submit Information")
 
             popup_response_text = gr.Textbox(label="Agent Question", visible=False, interactive=False)
-            popup_user_input = gr.Textbox(label="Your Answer", visible=False)
+            popup_user_input = gr.Textbox(label="Your Answer", visible=False, interactive=True)
             popup_answer_btn = gr.Button("Answer", visible=False)
 
             submit_task_btn.click(
@@ -208,7 +186,7 @@ def create_interface():
                     popup_response_text,
                     popup_user_input,
                     popup_answer_btn,
-                    result_output  # optional: use it to indicate success or status
+                    result_output
                 ]
             )
 
@@ -235,14 +213,39 @@ def create_interface():
         listen_gmail_btn.click(fn=setup_channels, outputs=result_output)
         setup_github_task_btn.click(fn=setup_tasks, outputs=result_output)
         send_command_btn.click(fn=process_message, inputs=test_input, outputs=result_output)
-        popup_answer_btn.click(fn=process_planning_message, inputs=test_input, outputs=result_output)
 
-        test_input.submit(fn=process_message, inputs=test_input, outputs=[result_output, test_input])
+        # Handler for "Answer" button: append user input to new_task_description
+        def handle_answer(user_answer, current_description):
+            if not user_answer:
+                return current_description
+            new_statement = task_planner.process_answer(user_answer)
+            return current_description + "\n" + new_statement
+
+        popup_answer_btn.click(
+            fn=handle_answer,
+            inputs=[popup_user_input, new_task_description],
+            outputs=new_task_description
+        ).then(
+            fn=handle_submit_task,
+            inputs=[new_task_name, new_task_description],
+            outputs=[
+                popup_response_text,
+                popup_user_input,
+                popup_answer_btn,
+                result_output
+            ]
+        ).then(
+            fn=get_task_table,
+            inputs=[],
+            outputs=task_list
+        )
+
+        test_input.submit(fn=process_message, inputs=test_input, outputs=result_output)
         
     return demo
 
-async def async_init():
-    global chatmanager, exit_stack, task_storage, planning_agent
+async def async_init(loop):
+    global chatmanager, exit_stack, task_storage, task_planner
     
     logging.info("Initializing async components...")
 
@@ -258,7 +261,7 @@ async def async_init():
     navigation_agent = NavigationAgent(servers, llm_client)
     page_analysis_agent = PageAnalysisAgent(llm_client)
     chatmanager = ConversationAgent(llm_client, navigation_agent, page_analysis_agent)
-    planning_agent = PlanningAgent(llm_client)
+    task_planner = TaskPlanner(loop, llm_client)
     task_storage = TaskStorage()
     task_storage.initialize()
     await navigation_agent.initialize()
@@ -279,12 +282,6 @@ async def cleanup():
         except Exception as e:
             logging.error(f"Error during chat manager cleanup: {e}")
     
-    if planning_agent:
-        try:
-            await planning_agent.cleanup()
-        except Exception as e:
-            logging.error(f"Error during planning agent cleanup: {e}")
-
     if exit_stack:
         try:
             await exit_stack.aclose()
@@ -302,7 +299,7 @@ async def run_app():
         loop = asyncio.get_event_loop()
 
         # Initialize async components
-        await async_init()
+        await async_init(loop)
 
         # Create and configure Gradio interface
         demo = create_interface()

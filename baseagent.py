@@ -89,6 +89,7 @@ class BaseAgent(ABC):
 
         logging.info("Processing user input:" + user_input + " by agent " + self.__class__.__name__)
         self.conversation.append({"role": "user", "content": user_input})
+        logging.info(f"System message: {self.get_system_message()}")
         response = self.llm_client.get_response(self.get_system_message(), self.conversation)
         self.conversation.append({"role": "assistant", "content": response})
         logging.info(f"Got LLM response:{response}")
