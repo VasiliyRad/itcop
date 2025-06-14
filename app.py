@@ -123,7 +123,7 @@ def handle_submit_task(name, description):
             gr.update(visible=False)
         )
     else:
-        task = AutomationTask(id="new", name=name, description=description)
+        task = task_planner.prepare_plan(id="new", name=name, task_description=description)
         task_storage.addTask(task)
         return (
             gr.update(value="Task submitted successfully!", visible=True),

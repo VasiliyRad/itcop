@@ -6,6 +6,7 @@ class AutomationTask:
     id: str
     name: str
     description: Optional[str] = None
+    steps: Optional[list] = None
 
     def to_dict(self):
         return asdict(self)
@@ -15,5 +16,6 @@ class AutomationTask:
         return AutomationTask(
             id=data.get("id", ""),
             name=data.get("name", ""),
-            description=data.get("description")
+            description=data.get("description", ""),
+            steps=data.get("steps", [])
         )

@@ -6,6 +6,7 @@ import logging
 from answerhandlingagent import AnswerHandlingAgent
 from automation_task import AutomationTask
 from missinginfoagent import MissingInfoAgent
+from stepplanneragent import StepPlannerAgent
 
 
 class TaskPlanner:
@@ -16,6 +17,7 @@ class TaskPlanner:
         self.loop = loop
         self.missing_info_agent = MissingInfoAgent(llm_client)
         self.answer_agent = AnswerHandlingAgent(llm_client)
+        self.step_planner_agent = StepPlannerAgent(llm_client)
 
     def start_conversation(self):
         self.questions = []
@@ -86,7 +88,26 @@ class TaskPlanner:
             agent_question = agent_question + f"\nReason: {self.reason}"
         return agent_question
     
-    def prepare_plan(self, task_description: str) -> AutomationTask:
-        return ""
+    def prepare_plan(self, id: str, name: str, task_description: str) -> AutomationTask:
+        if (len(task_description) == 0):
+            logging.error("Task description is empty")
+            return None
+        
+        self.step_planner_agent.set_task_description(task_description)
+        logging.info(f"Preparing plan for task description: {task_description}")
+        result = self._run_async_safely(self.step_planner_agent.process_message("?"))
+        if result is None:
+            logging.error("Failed to prepare plan")
+            return None
+        
+        try:
+            json_result = json.loads(result)
+        except json.JSONDecodeError as e:
+            logging.error(f"JSON decode error: {e}")
+            return None
+        
+        logging.info(f"Plan prepared: {json_result}")
+        logging.info(f"id={id}, name={name}, task_description={task_description}, result={result}")
+        return AutomationTask(id=id, name=name, description=task_description, steps=result)
 
     
