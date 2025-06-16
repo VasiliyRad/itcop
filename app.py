@@ -31,7 +31,8 @@ def setup_channels():
 def setup_tasks():
     logging.info("Setting up GitHub task")
     process_message("navigate to github.com")
-    process_message("Click sign in button")
+    process_message("find reference id for sign in link")
+    process_message("Click sign in link")    #process_message("Click sign in button")
     #process_message("Click on username input box to make sure it is in focus")
     process_message("Slowly fill in username as vasiliy@live.com into username input box that is currently in focus")
 

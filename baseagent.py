@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import Optional, Any
 from llm_client import LLMClient
 from tool import Tool
@@ -13,9 +14,34 @@ logging.basicConfig(
 class AgentConfig:
     MAX_TOOL_ITERATIONS = 20
     TOOL_RESULT_DEBUG_LIMIT = 2000
+    LOG_FILE_NAME = "agent_conversations.tsv"
 
 class BaseAgent(ABC):
     """Base Agent class."""
+
+    def _sanitize_field(self, text: str) -> str:
+        return text.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ').strip()
+
+
+    def _log_conversation_to_file(self, input_text: str, output_text: str):
+        """Append a conversation record to agent_conversations.tsv in tab-separated format."""
+
+        agent_name = self.__class__.__name__
+        llm_version = self.llm_client.llm_version()
+        prompt = self._sanitize_field(self.get_system_prompt())
+        version = "1"
+
+        input_text = self._sanitize_field(input_text)
+        output_text = self._sanitize_field(output_text)
+        feedback = ""
+
+        # Prepare line
+        line = f"{agent_name}\t{llm_version}\t{prompt}\t{version}\t{input_text}\t{output_text}\t{feedback}\n"
+        if not os.path.exists(AgentConfig.LOG_FILE_NAME):
+            with open(AgentConfig.LOG_FILE_NAME, "w") as f:
+                f.write("Agent\tLLM\tPrompt\tversion\tinput\toutput\tfeedback\n")
+        with open(AgentConfig.LOG_FILE_NAME, "a", encoding="utf-8") as f:
+            f.write(line)
 
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client: LLMClient = llm_client
@@ -91,8 +117,12 @@ class BaseAgent(ABC):
         self.conversation.append({"role": "user", "content": user_input})
         logging.info(f"System message: {self.get_system_message()}")
         response = self.llm_client.get_response(self.get_system_message(), self.conversation)
-        self.conversation.append({"role": "assistant", "content": response})
+
         logging.info(f"Agent {self.__class__.__name__} got LLM response:{response}")
+        input_text = "   ***  ".join(str(msg) for msg in self.conversation)
+        self._log_conversation_to_file(input_text, response)
+
+        self.conversation.append({"role": "assistant", "content": response})
 
         max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
         iteration_count = 0
@@ -106,14 +136,17 @@ class BaseAgent(ABC):
 
             iteration_count += 1
             logging.info(f"Tool iteration {iteration_count}: processing tool result:\n{result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT]}")
-        
+
             # Append tool result to conversation history
             messages = self.llm_client.append_tool_response(result, self.conversation)
 
             # Get next LLM response based on tool result
             response = self.llm_client.get_response(self.get_system_message(), messages=messages)
-            self.conversation.append({"role": "assistant", "content": response})
             logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
+            input_text = "   ***  ".join(str(msg) for msg in self.conversation)
+            self._log_conversation_to_file(input_text, response)
+
+            self.conversation.append({"role": "assistant", "content": response})
 
         if iteration_count >= max_iterations:
             logging.warning(f"Reached maximum tool iterations ({max_iterations})")
@@ -139,7 +172,9 @@ class BaseAgent(ABC):
         system_message = self.get_system_message()
         logging.info(f"System message: {system_message}")
         response = self.llm_client.get_response(system_message, conversation)
+
         logging.info(f"Agent {self.__class__.__name__}: got LLM response: {response}")
+        self._log_conversation_to_file(request, response)
 
         max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
         iteration_count = 0
@@ -163,6 +198,11 @@ class BaseAgent(ABC):
             messages = self.llm_client.append_tool_response(result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT], [{"role": "user", "content": request}])
             response = self.llm_client.get_response(system_message, messages=messages)
             logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
+
+            input_text = "   ---  ".join(str(msg) for msg in conversation)
+            self._log_conversation_to_file(input_text, response)
+
+            self.conversation.append({"role": "assistant", "content": response})
 
         if iteration_count >= max_iterations:
             logging.warning(f"Reached maximum tool iterations ({max_iterations})")

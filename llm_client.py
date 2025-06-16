@@ -60,6 +60,11 @@ class LLMClient(ABC):
             return response
 
     @abstractmethod
+    def llm_version(self) -> str:
+        """Report name and version of the LLM"""
+        pass
+
+    @abstractmethod
     def get_response_from_LLM(self, system_prompt: str, messages: list[dict[str, str]]) -> str:
         """Get a response from the LLM provider (no cache)."""
         pass
@@ -106,6 +111,12 @@ class LLMClient(ABC):
 
 class ClaudeLLMClient(LLMClient):
     """LLM client for Anthropic Claude."""
+    def __init__(self, api_key: str = None) -> None:
+        super().__init__(api_key)
+        self.model_name = "claude-3-7-sonnet-20250219"
+
+    def llm_version(self) -> str:
+        return self.model_name
 
     def get_max_tool_response_length(self) -> int:
         return 8000
@@ -134,7 +145,7 @@ class ClaudeLLMClient(LLMClient):
                 structured_messages.append({"role": role, "content": content})
 
         payload = {
-            "model": "claude-3-7-sonnet-20250219",
+            "model": self.model,
             "max_tokens": 4096,
             "temperature": 0.7,
             "top_p": 1.0,
@@ -178,6 +189,9 @@ class LocalQwenLLMClient(LLMClient):
             device_map="auto"
         )
         logging.info(f"Loaded model and tokenizer for {self.model_name}")
+
+    def llm_version(self) -> str:
+        return self.model_name
 
     def get_max_tool_response_length(self) -> int:
         return 16000
@@ -229,6 +243,12 @@ class LocalQwenLLMClient(LLMClient):
 
 class LocalQwenOlamaLLMClient(LLMClient):
     """LLM client for local Qwen (from olama)."""
+    def __init__(self, api_key: str = None, model_name: str = "qwen3:8b") -> None:
+        super().__init__(api_key)
+        self.model_name = model_name
+
+    def llm_version(self) -> str:
+        return self.model_name
 
     def get_max_tool_response_length(self) -> int:
         return 16000
@@ -245,7 +265,7 @@ class LocalQwenOlamaLLMClient(LLMClient):
 
         try:
             # model='qwen3:32b', model='qwen3:8b', model='llama3.2'
-            response: ChatResponse = chat(model='qwen3:8b', messages=input_messages, options={'timeout': LLMConfig.LOCAL_TIMEOUT})
+            response: ChatResponse = chat(model=self.model_name, messages=input_messages, options={'timeout': LLMConfig.LOCAL_TIMEOUT})
         except Exception as e:
             logging.error(f"Exception when running local model: {e}")
             return "error!"
@@ -266,7 +286,11 @@ class ChatGPTLLMClient(LLMClient):
     def __init__(self, api_key: str = None) -> None:
         super().__init__(api_key)
         self.delay: float = 0.0  # Rate limiting delay
+        self.model_name = "gpt-4.1"
 
+    def llm_version(self) -> str:
+        return self.model_name
+    
     # chatgpt cheap pricing tier limit: 8000
     def get_max_tool_response_length(self) -> int:
         return 8000
@@ -310,7 +334,7 @@ class ChatGPTLLMClient(LLMClient):
             structured_messages.append({"role": role, "content": content})
 
         payload = {
-            "model": "gpt-4.1-mini",  # or "gpt-4-turbo", "gpt-3.5-turbo", etc.
+            "model": self.model_name,  # or "gpt-4-turbo", "gpt-3.5-turbo", etc.
             "messages": structured_messages,
             "max_tokens": 4096,
             "temperature": 0.7,
