@@ -92,7 +92,7 @@ class BaseAgent(ABC):
         logging.info(f"System message: {self.get_system_message()}")
         response = self.llm_client.get_response(self.get_system_message(), self.conversation)
         self.conversation.append({"role": "assistant", "content": response})
-        logging.info(f"Got LLM response:{response}")
+        logging.info(f"Agent {self.__class__.__name__} got LLM response:{response}")
 
         max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
         iteration_count = 0
@@ -101,11 +101,11 @@ class BaseAgent(ABC):
             result = await self.process_llm_response(response)
 
             if result == response:
-                logging.info("No tool called, ending loop")
+                logging.info(f"Agent {self.__class__.__name__}: no tool called, ending loop")
                 break
 
             iteration_count += 1
-            logging.info(f"Tool iteration {iteration_count}: processing tool result")
+            logging.info(f"Tool iteration {iteration_count}: processing tool result:\n{result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT]}")
         
             # Append tool result to conversation history
             messages = self.llm_client.append_tool_response(result, self.conversation)
@@ -113,7 +113,7 @@ class BaseAgent(ABC):
             # Get next LLM response based on tool result
             response = self.llm_client.get_response(self.get_system_message(), messages=messages)
             self.conversation.append({"role": "assistant", "content": response})
-            logging.info(f"Got LLM response after tool call {iteration_count}: {response}")
+            logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
 
         if iteration_count >= max_iterations:
             logging.warning(f"Reached maximum tool iterations ({max_iterations})")
@@ -137,8 +137,9 @@ class BaseAgent(ABC):
         # Prepare conversation: system + single user turn
         conversation = [{"role": "user", "content": request}]
         system_message = self.get_system_message()
+        logging.info(f"System message: {system_message}")
         response = self.llm_client.get_response(system_message, conversation)
-        logging.info(f"Got LLM response: {response}")
+        logging.info(f"Agent {self.__class__.__name__}: got LLM response: {response}")
 
         max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
         iteration_count = 0
@@ -148,11 +149,11 @@ class BaseAgent(ABC):
             result = await self.process_llm_response(response)
 
             if result == response:
-                logging.info("No tool called, ending loop")
+                logging.info(f"Agent {self.__class__.__name__}: no tool called, ending loop")
                 break
 
             iteration_count += 1
-            logging.info(f"Tool iteration {iteration_count}: processing tool result")
+            logging.info(f"Tool iteration {iteration_count}: processing tool result:\n{result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT]}")
 
             # Save last tool result for context
             last_tool_result = result
@@ -161,7 +162,7 @@ class BaseAgent(ABC):
             # Debugging: reduce tool result to first 2000 characters
             messages = self.llm_client.append_tool_response(result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT], [{"role": "user", "content": request}])
             response = self.llm_client.get_response(system_message, messages=messages)
-            logging.info(f"Got LLM response after tool call {iteration_count}: {response}")
+            logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
 
         if iteration_count >= max_iterations:
             logging.warning(f"Reached maximum tool iterations ({max_iterations})")

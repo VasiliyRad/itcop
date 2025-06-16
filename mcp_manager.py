@@ -81,7 +81,6 @@ class MCPManager:
             logging.exception("Exception: server is not initialized")
             raise RuntimeError(f"Server {self.name} is not initialized")
 
-        logging.info("Getting list of tools")
         if self._cached_tools == []:
             tools_response = await self.session.list_tools()
             self._cached_tools = []
@@ -93,7 +92,7 @@ class MCPManager:
                         for tool in item[1]
                     )
 
-        logging.info("Listed tools")
+        logging.info("Listed MCP tools")
 
         return self._cached_tools
 
@@ -133,7 +132,7 @@ class MCPManager:
                     self.session.call_tool(tool_name, arguments),
                     timeout=timeout
                 )
-                logging.info("Tool execution is done")
+                logging.info("MCP Tool execution is done")
 
                 return result
 

@@ -14,7 +14,7 @@ class PageAnalysisAgent(BaseAgent):
         self.page_context = page_context
 
     def get_system_prompt(self) -> str:
-        return "You are a browser automation agent.\nPAGE CONTEXT INFORMATION {self.page_context}.\nINSTRUCTIONS:\n - Use the context above to answer user questions\n - If information isn't in the context, say so clearly."
+        return f"You are a browser automation agent.\nPAGE CONTEXT INFORMATION {self.page_context}.\nINSTRUCTIONS:\n - Use the context above to answer user questions\n - If information isn't in the context, say so clearly."
     
     async def get_tools(self):
         return []

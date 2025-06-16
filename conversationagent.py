@@ -33,15 +33,15 @@ class ConversationAgent(BaseAgent):
         )
 
     async def execute_tool(self, tool_name: str, arguments: dict):
-        if tool_name == "browse_web":
+        if tool_name == "navigation_agent":
             webtask_result = await self.navigation_agent.process_task(arguments.get("action", ""))
             self.page_context = webtask_result.context
             logging.info(f"Web task executed: {webtask_result.response}, page context updated. (length: {len(self.page_context)})")
             return webtask_result.response
-        elif tool_name == "analyze_page":
+        elif tool_name == "page_analysis_agent":
             self.page_analysis_agent.set_page_context(self.page_context)
             page_analysis_result = await self.page_analysis_agent.process_task(arguments.get("analysis_type", ""))
-            logging.info(f"Page analysis executed: {page_analysis_result.response}")
+            logging.info(f"Page analysis executed: {page_analysis_result.response}, page context length: {len(self.page_context) if self.page_context else 'N/A'}")
             return page_analysis_result.response
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
@@ -49,24 +49,26 @@ class ConversationAgent(BaseAgent):
     async def get_tools(self) -> list[Tool]:
         return [
             Tool(
-                name="browse_web",
+                name="navigation_agent",
                 description="Navigate to a new page or perform actions like clicking on the current page.",
                 input_schema={ "properties": {
                     "action": {
                         "type": "string",
-                        "description": "The action to perform, e.g., 'navigate to github.com' or 'click on sign in link'."
+                        "description": "The action to perform, e.g., 'navigate to github.com' or 'click on sign in link'.",
+                        "reason": "The reason for taking this action, e.g., 'user requested to navigate to this page' or 'user requested to click on this link'."
                     }
                 },
                 "required": ["action"]
                 }
             ),
             Tool(
-                name="analyze_page",
+                name="page_analysis_agent",
                 description="Analyze the current page and find IDs of page elements.",
                 input_schema={ "properties": {
                     "analysis_type": {
                         "type": "string",
-                        "description": "Type of analysis to perform, e.g., 'find element ID for sign in button', 'find element ID for search input field', 'find element ID for submit button', 'inspect page structure', 'find all clickable elements'. Always include the specific element you're looking for when searching for particular elements."
+                        "description": "Type of analysis to perform, e.g., 'find element ID for sign in button', 'find element ID for search input field', 'find element ID for submit button', 'inspect page structure', 'find all clickable elements'. Always include the specific element you're looking for when searching for particular elements.",
+                        "reason": "The reason for performing this analysis, e.g., 'looking for ID of the link that the user requested to click on'"
                     }
                 },
                 "required": ["analysis_type"]

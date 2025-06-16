@@ -29,19 +29,16 @@ def setup_channels():
     return "Started listening to Gmail ✅"
 
 def setup_tasks():
+    logging.info("Setting up GitHub task")
     process_message("navigate to github.com")
-    process_message("Find sign in button on the page")
     process_message("Click sign in button")
-    process_message("Find username input box on the page")
-    process_message("Click on username input box to make sure it is in focus")
+    #process_message("Click on username input box to make sure it is in focus")
     process_message("Slowly fill in username as vasiliy@live.com into username input box that is currently in focus")
 
-    process_message("Find password input box on the page")
-    process_message("Click on password input box to make sure it is in focus")
+    #process_message("Click on password input box to make sure it is in focus")
     github_password = os.environ.get("GITHUB_PASSWORD", "")
     process_message("Slowly fill in password as " + github_password + " into password input box that is currently in focus")
 
-    process_message("Find sign in button on the page")
     process_message("Click sign in button") 
     return "GitHub task setup complete ✅"
 
@@ -76,41 +73,41 @@ def render_tab(tab, command_input=""):
         return (
             "Configure credentials",
             gr.update(visible=True), gr.update(visible=True),
+            gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
-            "", gr.update(visible=False)
+            "", gr.update(visible=False), gr.update(visible=False)
         )
     elif tab == "Setup channels":
         return (
             "Setup channels",
             gr.update(visible=False), gr.update(visible=False),
-            gr.update(visible=True), gr.update(visible=False),
+            gr.update(visible=True),
             gr.update(visible=False), gr.update(visible=False),
-            "", gr.update(visible=False)
+            "", gr.update(visible=False), gr.update(visible=False)
         )
     elif tab == "Setup tasks":
         return (
             "Setup automation tasks",
             gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
-            "", gr.update(visible=True)
+            "", gr.update(visible=True), gr.update(visible=False)
         )
     elif tab == "Monitor tasks":
         return (
             "Monitor tasks",
             gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False),
             gr.update(visible=False), gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
-            monitor_tasks(), gr.update(visible=False)
+            monitor_tasks(), gr.update(visible=False), gr.update(visible=False)
         )
     elif tab == "Test MCP":
         return (
             "Test MCP",
             gr.update(visible=False), gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
+            gr.update(visible=False),
             gr.update(visible=True), gr.update(visible=True),
-            "", gr.update(visible=False)
+            "", gr.update(visible=False), gr.update(visible=True)
         )
 
 def handle_submit_task(name, description):
@@ -131,6 +128,18 @@ def handle_submit_task(name, description):
             gr.update(visible=False),
             gr.update(visible=False)
         )
+
+def handle_task_edit(evt: gr.SelectData):
+    if evt.index[1] == 3:  # Edit column clicked
+        selected_task = task_storage.listTasks()[evt.index[0]]
+        return (
+            True,  # edit_mode
+            "### Edit Task",  # section title
+            selected_task.name,  # task name
+            selected_task.description or "",  # task description
+            json.dumps(selected_task.to_dict(), indent=2)  # task json
+        )
+    return False, "### Define New Task", "", "", ""
     
 def create_interface():
     with gr.Blocks() as demo:
@@ -146,9 +155,9 @@ def create_interface():
         setup_gmail_btn = gr.Button("Setup Gmail", visible=False)
         setup_github_btn = gr.Button("Setup GitHub", visible=False)
         listen_gmail_btn = gr.Button("Listen to Gmail", visible=False)
-        setup_github_task_btn = gr.Button("Setup GitHub Task", visible=False)
-        test_input = gr.Textbox(label="Command to send to MCP", visible=False)
+        mcp_input = gr.Textbox(label="Command to send to MCP", visible=False)
         send_command_btn = gr.Button("Send Command", visible=False)
+        execute_test_btn = gr.Button("Execute test set of actions", visible=False)
 
         # --- Setup Tasks Tab UI ---
         with gr.Column(visible=False) as setup_tasks_tab:
@@ -159,17 +168,19 @@ def create_interface():
                 if task_storage is None:
                     return []
                 return [
-                    [task.name, task.description or "", "Edit"] for task in task_storage.listTasks()
+                    [task.name, task.description or "", task.steps or "", "Edit"] for task in task_storage.listTasks()
                 ]
             task_list = gr.Dataframe(
-                headers=["Name", "Description", "Edit"],
-                datatype=["str", "str", "str"],
-                interactive=False,
+                headers=["Name", "Description", "Steps", "Edit"],
+                datatype=["str", "str", "str", "str"],
+                interactive=True,
                 value=get_task_table(),
-                elem_id="task-list"
+                elem_id="task-list",
+                wrap=True
             )
+            edit_mode = gr.State(False)
+            task_section_title = gr.Markdown("### Define New Task")
             gr.Markdown("---")
-            gr.Markdown("### Define New Task")
             new_task_name = gr.Textbox(label="Task Name", interactive=True)
             new_task_json = gr.Textbox(label="Task JSON", interactive=False)
             new_task_description = gr.Textbox(label="Task Description", interactive=True)
@@ -203,16 +214,16 @@ def create_interface():
         selected_tab.change(fn=render_tab, inputs=[selected_tab],
                             outputs=[tab_title,
                                     setup_gmail_btn, setup_github_btn,
-                                    listen_gmail_btn, setup_github_task_btn,
-                                    test_input, send_command_btn,
+                                    listen_gmail_btn,
+                                    mcp_input, send_command_btn,
                                     result_output,
-                                    setup_tasks_tab])
+                                    setup_tasks_tab, execute_test_btn])
 
         setup_gmail_btn.click(fn=lambda: configure_credentials("Gmail"), outputs=result_output)
         setup_github_btn.click(fn=lambda: configure_credentials("GitHub"), outputs=result_output)
         listen_gmail_btn.click(fn=setup_channels, outputs=result_output)
-        setup_github_task_btn.click(fn=setup_tasks, outputs=result_output)
-        send_command_btn.click(fn=process_message, inputs=test_input, outputs=result_output)
+        send_command_btn.click(fn=process_message, inputs=mcp_input, outputs=result_output)
+        execute_test_btn.click(fn=setup_tasks, outputs=result_output)
 
         # Handler for "Answer" button: append user input to new_task_description
         def handle_answer(user_answer, current_description):
@@ -240,7 +251,12 @@ def create_interface():
             outputs=task_list
         )
 
-        test_input.submit(fn=process_message, inputs=test_input, outputs=result_output)
+        task_list.select(
+            fn=handle_task_edit,
+            outputs=[edit_mode, task_section_title, new_task_name, new_task_description, new_task_json]
+        )
+
+        mcp_input.submit(fn=process_message, inputs=mcp_input, outputs=result_output)
         
     return demo
 
@@ -304,32 +320,23 @@ async def run_app():
         # Create and configure Gradio interface
         demo = create_interface()
         demo.queue()
-        
-        # Start Gradio in a separate thread but keep this event loop running
 
-        gradio_ready = threading.Event()
-        
+        shutdown_event = asyncio.Event()
+                
         # Start Gradio in a separate thread
         def start_gradio():
             try:
-                demo.launch(share=False, server_name="127.0.0.1", server_port=7861)
-                gradio_ready.set()
+                demo.launch(share=False, server_name="127.0.0.1", server_port=7861, prevent_thread_lock=True)
             except Exception as e:
                 logging.error(f"Error starting Gradio: {e}")
-                gradio_ready.set()  # Set event even on error to avoid hanging
+                shutdown_event.set()
         
         gradio_thread = threading.Thread(target=start_gradio, daemon=True)
         gradio_thread.start()
-        
-        # Wait a bit for Gradio to start
-        await asyncio.sleep(2)
-        
-        logging.info("Gradio server started, keeping event loop alive...")
-               
+                       
         # Keep the event loop alive
         try:
-            while True:
-                await asyncio.sleep(1)
+            await shutdown_event.wait()
         except KeyboardInterrupt:
             logging.info("Received shutdown signal")
             
