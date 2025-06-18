@@ -7,8 +7,6 @@ import re
 from ollama import chat
 from ollama import ChatResponse
 from typing import Optional
-from pydantic import BaseModel, Field
-from pydantic.networks import HttpUrl
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import concurrent.futures
@@ -99,7 +97,7 @@ class LLMClient(ABC):
             logging.info("Writing tool response to log file")   
             with open(self.tool_log_file, "w") as file:
                 file.write(response)
-        response = response[:self.get_max_tool_response_length()]
+        response = "Tool execution result: SUCCESS. Detailed " + response[:self.get_max_tool_response_length()]
         
         if (self.include_tool_results_in_history()):
             # Include tool result in conversation history

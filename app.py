@@ -1,5 +1,6 @@
 from contextlib import AsyncExitStack
 import json
+import time
 import gradio as gr
 import asyncio
 import logging
@@ -31,15 +32,20 @@ def setup_channels():
 def setup_tasks():
     logging.info("Setting up GitHub task")
     process_message("navigate to github.com")
+    time.sleep(1)
     process_message("find reference id for sign in link")
+    time.sleep(1)
     process_message("Click sign in link")    #process_message("Click sign in button")
+    time.sleep(1)
     process_message("Click on username input box to make sure it is in focus")
+    time.sleep(1)
     process_message("Slowly fill in username as vasiliy@live.com into username input box that is currently in focus")
-
+    time.sleep(1)
     process_message("Click on password input box to make sure it is in focus")
+    time.sleep(1)
     github_password = os.environ.get("GITHUB_PASSWORD", "")
     process_message("Slowly fill in password as " + github_password + " into password input box that is currently in focus")
-
+    time.sleep(1)
     process_message("Click sign in button") 
     return "GitHub task setup complete ✅"
 
@@ -149,17 +155,12 @@ def create_interface():
 
         selected_tab = gr.Dropdown(tabs, label="Navigation", value="Monitor tasks")
         tab_title = gr.Markdown("Monitor tasks")
-
-        result_output = gr.Textbox(label="Result", interactive=False, visible=False)
-
-        # Buttons for each tab
         setup_gmail_btn = gr.Button("Setup Gmail", visible=False)
         setup_github_btn = gr.Button("Setup GitHub", visible=False)
         listen_gmail_btn = gr.Button("Listen to Gmail", visible=False)
         mcp_input = gr.Textbox(label="Command to send to MCP", visible=False)
         send_command_btn = gr.Button("Send Command", visible=False)
-        execute_test_btn = gr.Button("Execute test set of actions", visible=False)
-
+        result_output = gr.Textbox(label="Result", interactive=False, visible=False)
         # --- Setup Tasks Tab UI ---
         with gr.Column(visible=False) as setup_tasks_tab:
             gr.Markdown("### Existing Tasks")
@@ -201,6 +202,7 @@ def create_interface():
                     result_output
                 ]
             )
+        execute_test_btn = gr.Button("Execute test set of actions", visible=False)
 
         # --- Setup Tasks Tab Logic ---
         # Update Task JSON when name or description changes
