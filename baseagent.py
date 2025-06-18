@@ -143,14 +143,13 @@ class BaseAgent(ABC):
             # Get next LLM response based on tool result
             response = self.llm_client.get_response(self.get_system_message(), messages=messages)
             logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
-            input_text = "   ***  ".join(str(msg) for msg in self.conversation)
+            input_text = "   ***  ".join(str(msg) for msg in messages)
             self._log_conversation_to_file(input_text, response)
-
-            self.conversation.append({"role": "assistant", "content": response})
 
         if iteration_count >= max_iterations:
             logging.warning(f"Reached maximum tool iterations ({max_iterations})")
             
+        self.conversation.append({"role": "assistant", "content": response})
         logging.info("Responded to user")
         return response
 
@@ -174,7 +173,8 @@ class BaseAgent(ABC):
         response = self.llm_client.get_response(system_message, conversation)
 
         logging.info(f"Agent {self.__class__.__name__}: got LLM response: {response}")
-        self._log_conversation_to_file(request, response)
+        input_text = "   ---  ".join(str(msg) for msg in conversation)
+        self._log_conversation_to_file(input_text, response)
 
         max_iterations = AgentConfig.MAX_TOOL_ITERATIONS
         iteration_count = 0
@@ -199,13 +199,13 @@ class BaseAgent(ABC):
             response = self.llm_client.get_response(system_message, messages=messages)
             logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
 
-            input_text = "   ---  ".join(str(msg) for msg in conversation)
+            input_text = "   ---  ".join(str(msg) for msg in messages)
             self._log_conversation_to_file(input_text, response)
-
-            self.conversation.append({"role": "assistant", "content": response})
 
         if iteration_count >= max_iterations:
             logging.warning(f"Reached maximum tool iterations ({max_iterations})")
+
+        self.conversation.append({"role": "assistant", "content": response})
 
         logging.info("Responded to single-turn task")
         return TaskResult(response=response, context=last_tool_result)

@@ -33,10 +33,10 @@ def setup_tasks():
     process_message("navigate to github.com")
     process_message("find reference id for sign in link")
     process_message("Click sign in link")    #process_message("Click sign in button")
-    #process_message("Click on username input box to make sure it is in focus")
+    process_message("Click on username input box to make sure it is in focus")
     process_message("Slowly fill in username as vasiliy@live.com into username input box that is currently in focus")
 
-    #process_message("Click on password input box to make sure it is in focus")
+    process_message("Click on password input box to make sure it is in focus")
     github_password = os.environ.get("GITHUB_PASSWORD", "")
     process_message("Slowly fill in password as " + github_password + " into password input box that is currently in focus")
 
