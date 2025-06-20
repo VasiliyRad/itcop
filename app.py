@@ -29,7 +29,7 @@ def configure_credentials(action):
 def setup_channels():
     return "Started listening to Gmail ✅"
 
-def setup_tasks():
+def execute_task():
     logging.info("Setting up GitHub task")
     process_message("navigate to github.com")
     time.sleep(1)
@@ -81,40 +81,40 @@ def render_tab(tab, command_input=""):
             "Configure credentials",
             gr.update(visible=True), gr.update(visible=True),
             gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
-            "", gr.update(visible=False), gr.update(visible=False)
+            gr.update(visible=False), 
+            gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
         )
     elif tab == "Setup channels":
         return (
             "Setup channels",
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=True),
-            gr.update(visible=False), gr.update(visible=False),
-            "", gr.update(visible=False), gr.update(visible=False)
+            gr.update(visible=False), 
+            gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
         )
     elif tab == "Setup tasks":
         return (
             "Setup automation tasks",
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
-            "", gr.update(visible=True), gr.update(visible=False)
+            gr.update(visible=True), 
+            gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
         )
     elif tab == "Monitor tasks":
         return (
             "Monitor tasks",
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False),
-            gr.update(visible=False), gr.update(visible=False),
-            monitor_tasks(), gr.update(visible=False), gr.update(visible=False)
+            gr.update(visible=False), 
+            gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
         )
     elif tab == "Test MCP":
         return (
             "Test MCP",
             gr.update(visible=False), gr.update(visible=False),
             gr.update(visible=False),
-            gr.update(visible=True), gr.update(visible=True),
-            "", gr.update(visible=False), gr.update(visible=True)
+            gr.update(visible=False), 
+            gr.update(visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
         )
 
 def handle_submit_task(name, description):
@@ -202,7 +202,7 @@ def create_interface():
                     result_output
                 ]
             )
-        execute_test_btn = gr.Button("Execute test set of actions", visible=False)
+        execute_test_btn = gr.Button("Execute first task", visible=False)
 
         # --- Setup Tasks Tab Logic ---
         # Update Task JSON when name or description changes
@@ -218,15 +218,14 @@ def create_interface():
                             outputs=[tab_title,
                                     setup_gmail_btn, setup_github_btn,
                                     listen_gmail_btn,
-                                    mcp_input, send_command_btn,
-                                    result_output,
-                                    setup_tasks_tab, execute_test_btn])
+                                    setup_tasks_tab,
+                                    mcp_input, send_command_btn, result_output, execute_test_btn])
 
         setup_gmail_btn.click(fn=lambda: configure_credentials("Gmail"), outputs=result_output)
         setup_github_btn.click(fn=lambda: configure_credentials("GitHub"), outputs=result_output)
         listen_gmail_btn.click(fn=setup_channels, outputs=result_output)
         send_command_btn.click(fn=process_message, inputs=mcp_input, outputs=result_output)
-        execute_test_btn.click(fn=setup_tasks, outputs=result_output)
+        execute_test_btn.click(fn=execute_task, outputs=result_output)
 
         # Handler for "Answer" button: append user input to new_task_description
         def handle_answer(user_answer, current_description):
