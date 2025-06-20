@@ -22,6 +22,8 @@ class TaskStorage:
 
     def addTask(self, task: AutomationTask):
         """Add a task and update local file tasks.json"""
+        if task is None:
+            raise ValueError("Cannot add None as a task")
         self.tasks.append(task)
         self._save_tasks()
 

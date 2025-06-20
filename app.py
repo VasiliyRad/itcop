@@ -135,6 +135,13 @@ def handle_submit_task(name, description):
         )
     else:
         task = task_planner.prepare_plan(id="new", name=name, task_description=description)
+        if task is None:
+            return (
+                gr.update(value="Error: Task preparation failed", visible=True),
+                gr.update(value="", visible=False),
+                gr.update(visible=False),
+                gr.update(visible=False)
+            )
         task_storage.addTask(task)
         return (
             gr.update(value="Task submitted successfully!", visible=True),

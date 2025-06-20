@@ -34,11 +34,11 @@ class TaskPlanner:
             logging.error(f"Command timed out after {timeout} seconds")
             return None
         except Exception as e:
-            logging.error(f"Error running async operation: {e}")
+            logging.error("Error running async operation: %s", e)
             return None
 
     def check_for_missing_information(self, task_description: str) -> bool:
-        logging.info(f"Processing task description: {task_description}")
+        logging.info("Processing task description: %s", task_description)
         response = self._run_async_safely(self.missing_info_agent.process_message(task_description))
 
         if response is None:
@@ -50,8 +50,8 @@ class TaskPlanner:
         
         try:
             data = json.loads(response)
-            if not data or "question" not in data[0] or "possible_answers" not in data[0]:
-                logging.error("Invalid response format")
+            if not isinstance(data, list) or len(data) == 0 or "question" not in data[0] or "possible_answers" not in data[0]:
+                logging.error("Invalid response format in response: %s", response)
                 return False
         except json.JSONDecodeError as e:
             logging.error(f"JSON decode error: {e}")
@@ -71,7 +71,7 @@ class TaskPlanner:
             return ""
         
         self.answer_agent.set_question_and_answer(self.questions[-1], answer)
-        logging.info(f"Processing answer for question: {self.questions[-1]}")
+        logging.info("Processing answer for question: %s, answer: %s", self.questions[-1], answer)
         result = self._run_async_safely(self.answer_agent.process_message("?"))
 
         if result is None:
@@ -94,7 +94,7 @@ class TaskPlanner:
             return None
         
         self.step_planner_agent.set_task_description(task_description)
-        logging.info(f"Preparing plan for task description: {task_description}")
+        logging.info("Preparing plan for task description: %s", task_description)
         result = self._run_async_safely(self.step_planner_agent.process_message("?"))
         if result is None:
             logging.error("Failed to prepare plan")
@@ -106,8 +106,8 @@ class TaskPlanner:
             logging.error(f"JSON decode error: {e}")
             return None
         
-        logging.info(f"Plan prepared: {json_result}")
-        logging.info(f"id={id}, name={name}, task_description={task_description}, result={result}")
+        logging.info("Plan prepared: %s", json_result)
+        logging.info("id=%s, name=%s, task_description=%s, result=%s", id, name, task_description, result)
         return AutomationTask(id=id, name=name, description=task_description, steps=result)
 
     

@@ -35,8 +35,10 @@ class BaseAgent(ABC):
         output_text = self._sanitize_field(output_text)
         feedback = ""
 
-        # Prepare line
-        line = f"{agent_name}\t{llm_version}\t{prompt}\t{version}\t{input_text}\t{output_text}\t{feedback}\n"
+        line = "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (
+            agent_name, llm_version, prompt, version, input_text, output_text, feedback
+        )
+
         if not os.path.exists(AgentConfig.LOG_FILE_NAME):
             with open(AgentConfig.LOG_FILE_NAME, "w") as f:
                 f.write("Agent\tLLM\tPrompt\tversion\tinput\toutput\tfeedback\n")
@@ -113,12 +115,12 @@ class BaseAgent(ABC):
         if not self.initialized:
             await self.initialize()
 
-        logging.info("Processing user input:" + user_input + " by agent " + self.__class__.__name__)
+        logging.info("Processing user input: %s by agent %s", user_input, self.__class__.__name__)
         self.conversation.append({"role": "user", "content": user_input})
-        logging.info(f"System message: {self.get_system_message()}")
+        logging.info("System message: %s", self.get_system_message())
         response = self.llm_client.get_response(self.get_system_message(), self.conversation)
 
-        logging.info(f"Agent {self.__class__.__name__} got LLM response:{response}")
+        logging.info("Agent %s got LLM response: %s", self.__class__.__name__, response)
         input_text = "   ***  ".join(str(msg) for msg in self.conversation)
         self._log_conversation_to_file(input_text, response)
 
@@ -131,23 +133,23 @@ class BaseAgent(ABC):
             result = await self.process_llm_response(response)
 
             if result == response:
-                logging.info(f"Agent {self.__class__.__name__}: no tool called, ending loop")
+                logging.info("Agent %s: no tool called, ending loop", self.__class__.__name__)
                 break
 
             iteration_count += 1
-            logging.info(f"Tool iteration {iteration_count}: processing tool result:\n{result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT]}")
+            logging.info("Tool iteration %s: processing tool result:\n%s", iteration_count, result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT])
 
             # Append tool result to conversation history
             messages = self.llm_client.append_tool_response(result, self.conversation)
 
             # Get next LLM response based on tool result
             response = self.llm_client.get_response(self.get_system_message(), messages=messages)
-            logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
+            logging.info("Agent %s: got LLM response after tool call %s: %s", self.__class__.__name__, iteration_count, response[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT])
             input_text = "   ***  ".join(str(msg) for msg in messages)
             self._log_conversation_to_file(input_text, response)
 
         if iteration_count >= max_iterations:
-            logging.warning(f"Reached maximum tool iterations ({max_iterations})")
+            logging.warning("Reached maximum tool iterations (%s)", max_iterations)
             
         self.conversation.append({"role": "assistant", "content": response})
         logging.info("Responded to user")
@@ -164,15 +166,15 @@ class BaseAgent(ABC):
         if not self.initialized:
             await self.initialize()
 
-        logging.info("Processing single-turn task: " + request + " by agent " + self.__class__.__name__)
-
+        logging.info("Processing single-turn task: %s by agent %s", request, self.__class__.__name__)
+        
         # Prepare conversation: system + single user turn
         conversation = [{"role": "user", "content": request}]
         system_message = self.get_system_message()
-        logging.info(f"System message: {system_message}")
+        logging.info("System message: %s", system_message)
         response = self.llm_client.get_response(system_message, conversation)
 
-        logging.info(f"Agent {self.__class__.__name__}: got LLM response: {response}")
+        logging.info("Agent %s: got LLM response: %s", self.__class__.__name__, response)
         input_text = "   ---  ".join(str(msg) for msg in conversation)
         self._log_conversation_to_file(input_text, response)
 
@@ -184,11 +186,11 @@ class BaseAgent(ABC):
             result = await self.process_llm_response(response)
 
             if result == response:
-                logging.info(f"Agent {self.__class__.__name__}: no tool called, ending loop")
+                logging.info("Agent %s: no tool called, ending loop", self.__class__.__name__)
                 break
 
             iteration_count += 1
-            logging.info(f"Tool iteration {iteration_count}: processing tool result:\n{result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT]}")
+            logging.info("Tool iteration %s: processing tool result:\n%s", iteration_count, result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT])
 
             # Save last tool result for context
             last_tool_result = result
@@ -197,13 +199,13 @@ class BaseAgent(ABC):
             # Debugging: reduce tool result to first 2000 characters
             messages = self.llm_client.append_tool_response(result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT], [{"role": "user", "content": request}])
             response = self.llm_client.get_response(system_message, messages=messages)
-            logging.info(f"Agent {self.__class__.__name__}: got LLM response after tool call {iteration_count}: {response}")
+            logging.info("Agent %s: got LLM response after tool call %s: %s", self.__class__.__name__, iteration_count)
 
             input_text = "   ---  ".join(str(msg) for msg in messages)
             self._log_conversation_to_file(input_text, response)
 
         if iteration_count >= max_iterations:
-            logging.warning(f"Reached maximum tool iterations ({max_iterations})")
+            logging.warning("Reached maximum tool iterations (%s)", max_iterations)
 
         self.conversation.append({"role": "assistant", "content": response})
 
