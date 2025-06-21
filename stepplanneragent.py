@@ -41,8 +41,6 @@ Each action must be ONE of these types:
 - Type text into a specific input field
 - Select an option from a dropdown
 - Wait for an element to appear/disappear
-- Take a screenshot
-- Verify/check a condition
 
 NEVER combine actions like:
 ❌ "Enter username and password, then click the 'Sign in' button"

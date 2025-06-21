@@ -199,7 +199,7 @@ class BaseAgent(ABC):
             # Debugging: reduce tool result to first 2000 characters
             messages = self.llm_client.append_tool_response(result[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT], [{"role": "user", "content": request}])
             response = self.llm_client.get_response(system_message, messages=messages)
-            logging.info("Agent %s: got LLM response after tool call %s: %s", self.__class__.__name__, iteration_count)
+            logging.info("Agent %s: got LLM response after tool call %s: %s", self.__class__.__name__, iteration_count, response[:AgentConfig.TOOL_RESULT_DEBUG_LIMIT])
 
             input_text = "   ---  ".join(str(msg) for msg in messages)
             self._log_conversation_to_file(input_text, response)
