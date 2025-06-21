@@ -124,44 +124,86 @@ def render_tab(tab, command_input=""):
             gr.update(visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
         )
 
-def handle_submit_task(name, description):
-    info_is_missing = task_planner.check_for_missing_information(description)
-    if info_is_missing:
+def handle_submit_task(name, description, edit_mode, current_task_id):
+    if task_planner.check_for_missing_information(description):
         return (
             gr.update(value=task_planner.prepare_question(), visible=True),
             gr.update(value="", visible=True),
             gr.update(visible=True),
-            gr.update(visible=False)
-        )
-    else:
-        task = task_planner.prepare_plan(id="new", name=name, task_description=description)
-        if task is None:
-            return (
-                gr.update(value="Error: Task preparation failed", visible=True),
-                gr.update(value="", visible=False),
-                gr.update(visible=False),
-                gr.update(visible=False)
-            )
-        task_storage.addTask(task)
-        return (
-            gr.update(value="Task submitted successfully!", visible=True),
-            gr.update(value="", visible=False),
             gr.update(visible=False),
-            gr.update(visible=False)
+            get_task_table(),
+            True,
+            current_task_id
         )
 
+    if edit_mode and current_task_id:
+        task_id = current_task_id
+    else:
+        task_id = str(len(task_storage.tasks))
+    task = task_planner.prepare_plan(id=task_id, name=name, task_description=description)
+    if task is None:
+        return (
+            gr.update(value="Error: Task preparation failed", visible=True),
+            gr.update(value="", visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            get_task_table(),
+            False,
+            current_task_id
+        )
+    if edit_mode:
+        task_storage.updateTask(task)
+    else:
+        task_storage.addTask(task)
+
+    return (
+        gr.update(value="Task submitted successfully!", visible=True),
+        gr.update(value="", visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        get_task_table(),
+        False,
+        None
+    )
+
 def handle_task_edit(evt: gr.SelectData):
-    if evt.index[1] == 3:  # Edit column clicked
-        selected_task = task_storage.listTasks()[evt.index[0]]
+    action_col = evt.index[1]
+    row_idx = evt.index[0]
+
+    if action_col == 3:  # Edit column clicked
+        selected_task = task_storage.listTasks()[row_idx]
         return (
             True,  # edit_mode
             "### Edit Task",  # section title
             selected_task.name,  # task name
             selected_task.description or "",  # task description
-            json.dumps(selected_task.to_dict(), indent=2)  # task json
+            json.dumps(selected_task.to_dict(), indent=2),  # task json
+            get_task_table(),
+            True,
+            selected_task.id
         )
-    return False, "### Define New Task", "", "", ""
-    
+    elif action_col == 4:  # Delete column clicked
+        task_storage.removeTask(row_idx)
+        return (
+            False,  # edit_mode
+            "### Define New Task",  # section title
+            "",  # task name
+            "",  # task description
+            "",  # task json
+            get_task_table(),
+            False,
+            ""  # task id (not needed for deletion, but keeping structure consistent)
+        )
+    return False, "### Define New Task", "", "", "", get_task_table(), False, ""
+
+def get_task_table():
+    global task_storage
+    if task_storage is None:
+        return []
+    return [
+        [task.name, task.description or "", task.steps or "", "Edit", "Delete"] for task in task_storage.listTasks()
+    ]
+
 def create_interface():
     with gr.Blocks() as demo:
         tabs = ["Configure credentials", "Setup channels", "Setup tasks", "Monitor tasks", "Test MCP"]
@@ -179,23 +221,16 @@ def create_interface():
         # --- Setup Tasks Tab UI ---
         with gr.Column(visible=False) as setup_tasks_tab:
             gr.Markdown("### Existing Tasks")
-            # List of tasks with placeholder edit buttons
-            def get_task_table():
-                global task_storage
-                if task_storage is None:
-                    return []
-                return [
-                    [task.name, task.description or "", task.steps or "", "Edit"] for task in task_storage.listTasks()
-                ]
             task_list = gr.Dataframe(
-                headers=["Name", "Description", "Steps", "Edit"],
-                datatype=["str", "str", "str", "str"],
+                headers=["Name", "Description", "Steps", "Edit", "Delete"],
+                datatype=["str", "str", "str", "str", "str"],
                 interactive=True,
                 value=get_task_table(),
                 elem_id="task-list",
                 wrap=True
             )
             edit_mode = gr.State(False)
+            current_task_id = gr.State(None)
             task_section_title = gr.Markdown("### Define New Task")
             gr.Markdown("---")
             new_task_name = gr.Textbox(label="Task Name", interactive=True)
@@ -209,12 +244,15 @@ def create_interface():
 
             submit_task_btn.click(
                 fn=handle_submit_task,
-                inputs=[new_task_name, new_task_description],
+                inputs=[new_task_name, new_task_description, edit_mode, current_task_id],
                 outputs=[
                     popup_response_text,
                     popup_user_input,
                     popup_answer_btn,
-                    result_output
+                    result_output,
+                    task_list,
+                    edit_mode,
+                    current_task_id
                 ]
             )
         execute_test_btn = gr.Button("Execute first task", visible=False)
@@ -223,7 +261,7 @@ def create_interface():
         # Update Task JSON when name or description changes
         def update_task_json(name, description):
             import json
-            task = AutomationTask(id="new", name=name, description=description)
+            task = AutomationTask(id="preview", name=name, description=description)
             return json.dumps(task.to_dict(), indent=2)
         new_task_name.change(fn=update_task_json, inputs=[new_task_name, new_task_description], outputs=new_task_json)
         new_task_description.change(fn=update_task_json, inputs=[new_task_name, new_task_description], outputs=new_task_json)
@@ -255,12 +293,15 @@ def create_interface():
             outputs=new_task_description
         ).then(
             fn=handle_submit_task,
-            inputs=[new_task_name, new_task_description],
+            inputs=[new_task_name, new_task_description, edit_mode, current_task_id],
             outputs=[
                 popup_response_text,
                 popup_user_input,
                 popup_answer_btn,
-                result_output
+                result_output,
+                task_list,
+                edit_mode,
+                current_task_id
             ]
         ).then(
             fn=get_task_table,
@@ -270,7 +311,7 @@ def create_interface():
 
         task_list.select(
             fn=handle_task_edit,
-            outputs=[edit_mode, task_section_title, new_task_name, new_task_description, new_task_json]
+            outputs=[edit_mode, task_section_title, new_task_name, new_task_description, new_task_json, task_list, edit_mode, current_task_id],
         )
 
         mcp_input.submit(fn=process_message, inputs=mcp_input, outputs=result_output)
